@@ -23,7 +23,7 @@
 set -euo pipefail
 
 # Change these two to match your GitHub org/repo when you fork.
-REPO_URL="${REPO_URL:-https://github.com/YOUR_GH_USER/didstorageapp.git}"
+REPO_URL="${REPO_URL:-https://github.com/samharveysnt-dotcom/didstorageapp.git}"
 BRANCH="${BRANCH:-main}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/didstorage}"
 
