@@ -143,11 +143,34 @@ fi
 ok "ssh root@127.0.0.1 works"
 
 # ─────────────────────────────────────────────────────────────
-# Step 6 — Hand off to bootstrap.sh
+# Step 6 — Stage source outside the wipe target
+#
+# bootstrap.sh's Stage [02] (Wipe prior DIDStorage state) does
+# `rm -rf /opt/didstorage` on the remote — which IS 127.0.0.1 in
+# the on-box install. If bootstrap.sh runs with cwd inside
+# /opt/didstorage, that rm pulls its cwd out from under it and
+# later stages using relative paths (deploy/central/systemd,
+# asterisk/pjsip.conf) hit "getcwd() failed" / "No such file".
+#
+# Copy the source to /root/didstorage-build/ (untouched by the
+# wipe) and run bootstrap.sh from there.
+# ─────────────────────────────────────────────────────────────
+step "Stage source at /root/didstorage-build (outside the wipe path)"
+
+BUILD_DIR="/root/didstorage-build"
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+# Copy everything except .git — bootstrap doesn't need history and this
+# keeps the copy small.
+tar -C "$SRC_DIR" --exclude='.git' -cf - . | tar -C "$BUILD_DIR" -xf -
+ok "source staged at ${BUILD_DIR}"
+
+# ─────────────────────────────────────────────────────────────
+# Step 7 — Hand off to bootstrap.sh
 # ─────────────────────────────────────────────────────────────
 step "Running bootstrap.sh against 127.0.0.1 (~10-15 min, mostly the Asterisk source compile)"
 
-cd "$SRC_DIR"
+cd "$BUILD_DIR"
 export PUBLIC_IP
 export SSH_KEY=/root/.ssh/id_ed25519
 bash scripts/bootstrap.sh root@127.0.0.1 --yes
