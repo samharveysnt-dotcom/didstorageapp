@@ -89,9 +89,13 @@ ok "$(git --version)"
 ok "$(sudo --version | head -1)"
 ok "sshd active: $(systemctl is-active ssh 2>/dev/null || systemctl is-active sshd 2>/dev/null || echo unknown)"
 
-step "Install Go 1.22 to /usr/local/go (apt's golang-go is 1.19, too old for log/slog)"
+step "Install Go 1.23 to /usr/local/go (apt's golang-go is 1.19, too old for log/slog)"
 
-GO_VERSION="${GO_VERSION:-1.22.10}"
+# Pin to 1.23 because go.mod declares `toolchain go1.23.0`. Installing 1.22
+# here would trigger an auto-download of the 1.23 toolchain from
+# proxy.golang.org at build time — which is unreliable on VMs where
+# outbound to Google is slow or blocked.
+GO_VERSION="${GO_VERSION:-1.23.4}"
 GO_ARCH="linux-amd64"
 GO_TARBALL="go${GO_VERSION}.${GO_ARCH}.tar.gz"
 
