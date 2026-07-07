@@ -247,12 +247,20 @@ ok "ssh root@127.0.0.1 works"
 step "Stage source at /root/didstorage-build (outside the wipe path)"
 
 BUILD_DIR="/root/didstorage-build"
-rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
-# Copy everything except .git — bootstrap doesn't need history and this
-# keeps the copy small.
-tar -C "$SRC_DIR" --exclude='.git' -cf - . | tar -C "$BUILD_DIR" -xf -
-ok "source staged at ${BUILD_DIR}"
+# If the operator invoked install.sh from inside BUILD_DIR itself, SRC_DIR
+# equals BUILD_DIR — an `rm -rf $BUILD_DIR` here would nuke the source we're
+# about to copy from. Skip re-staging in that case; the tree is already in
+# place.
+if [[ "$(cd "$SRC_DIR" && pwd)" == "$BUILD_DIR" ]]; then
+  ok "already running from ${BUILD_DIR}; skipping re-stage"
+else
+  rm -rf "$BUILD_DIR"
+  mkdir -p "$BUILD_DIR"
+  # Copy everything except .git — bootstrap doesn't need history and this
+  # keeps the copy small.
+  tar -C "$SRC_DIR" --exclude='.git' -cf - . | tar -C "$BUILD_DIR" -xf -
+  ok "source staged at ${BUILD_DIR}"
+fi
 
 # ─────────────────────────────────────────────────────────────
 # Step 7 — Hand off to bootstrap.sh
