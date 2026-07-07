@@ -127,11 +127,13 @@ if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
   ADMIN_PASSWORD_PROVIDED=0
 fi
 
-# Asterisk source build pin. Prod runs 20.19.0; override with the env var
-# for a newer point release. "20-current" / "22-current" use the moving
+# Asterisk source build pin. 20.x is the LTS; override with the env var
+# for a newer point release. downloads.asterisk.org keeps only the current
+# tarball at the main path — older ones get rotated to old-releases/, so
+# the fetch below tries both. "20-current" / "22-current" use the moving
 # Asterisk-published "latest" tarball, which is fine for greenfield but
 # breaks reproducibility.
-ASTERISK_VERSION="${ASTERISK_VERSION:-20.19.0}"
+ASTERISK_VERSION="${ASTERISK_VERSION:-20.20.1}"
 
 # ─────────────────────────────────────────────────────────────
 # Output + trap machinery (mirrors deploy.sh styling)
@@ -333,14 +335,20 @@ set -e
 mkdir -p /usr/src/asterisk
 cd /usr/src/asterisk
 TARBALL="asterisk-${ASTERISK_VERSION}.tar.gz"
-SRCDIR="asterisk-${ASTERISK_VERSION}"
-# Download if missing. Use the maintained downloads.asterisk.org mirror.
+# Download if missing. downloads.asterisk.org keeps the current point release
+# at the main path and rotates older ones into old-releases/. If both 404
+# (because upstream rolled to a newer LTS mid-deploy), fall back to the
+# 20-current symlink so the deploy doesn't wedge.
 if [ ! -f "\$TARBALL" ]; then
   curl -fsSL -o "\$TARBALL" "https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-${ASTERISK_VERSION}.tar.gz" \\
-   || curl -fsSL -o "\$TARBALL" "https://downloads.asterisk.org/pub/telephony/asterisk/old-releases/asterisk-${ASTERISK_VERSION}.tar.gz"
+   || curl -fsSL -o "\$TARBALL" "https://downloads.asterisk.org/pub/telephony/asterisk/old-releases/asterisk-${ASTERISK_VERSION}.tar.gz" \\
+   || { echo "pinned asterisk-${ASTERISK_VERSION} unavailable, falling back to 20-current"; \\
+        curl -fsSL -o "\$TARBALL" "https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-20-current.tar.gz"; }
 fi
-rm -rf "\$SRCDIR"
+rm -rf asterisk-*/  # clear any prior extraction
 tar -xzf "\$TARBALL"
+# 20-current unpacks to whatever the actual version is, so discover it.
+SRCDIR="\$(tar -tzf "\$TARBALL" | head -1 | cut -d/ -f1)"
 cd "\$SRCDIR"
 
 # pjproject is bundled in-tree — using --with-pjproject-bundled avoids
