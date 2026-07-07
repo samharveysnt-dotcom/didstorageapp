@@ -194,6 +194,17 @@ func (h *Handler) precomputeTrace(callID string) {
 			h.Log.Warn("precomputeTrace lookup", "err", err, "call_id", cid)
 			return
 		}
+		// Don't persist an empty trace. A zero-message result usually means
+		// something transient (tshark missing, pcap flushing mid-parse, a
+		// permission race with sip-capture's daily rotation). Writing it to
+		// siptrace_json would let every future page load hit the fast-path
+		// and return empty forever. Skipping the UPDATE keeps siptrace_json
+		// NULL so /sip-trace re-runs Lookup on the next visit and self-heals.
+		if len(tr.Messages) == 0 {
+			h.Log.Info("siptrace precompute produced no messages, not persisting",
+				"call_id", cid)
+			return
+		}
 		blob, err := json.Marshal(tr)
 		if err != nil {
 			h.Log.Warn("precomputeTrace marshal", "err", err, "call_id", cid)

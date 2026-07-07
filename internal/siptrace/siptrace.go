@@ -55,9 +55,18 @@ const maxParallel = 4
 // after the initial parse.
 const cacheTTL = 24 * time.Hour
 
+// emptyCacheTTL is the shorter TTL applied when a Trace comes back with
+// zero messages. Prevents transient failures — tshark not yet installed,
+// grep permission race with the writer, filter typo — from poisoning the
+// cache for a full day. 5 min is short enough that a refresh after the
+// underlying cause is fixed shows real data, long enough to still absorb
+// dashboard reload storms.
+const emptyCacheTTL = 5 * time.Minute
+
 type cacheEntry struct {
 	trace *Trace
 	at    time.Time
+	ttl   time.Duration
 }
 
 var (
@@ -69,7 +78,14 @@ func cacheGet(key string) *Trace {
 	cacheMu.RLock()
 	defer cacheMu.RUnlock()
 	e, ok := cache[key]
-	if !ok || time.Since(e.at) > cacheTTL {
+	if !ok {
+		return nil
+	}
+	ttl := e.ttl
+	if ttl == 0 {
+		ttl = cacheTTL
+	}
+	if time.Since(e.at) > ttl {
 		return nil
 	}
 	// Return a clone — Sanitize() mutates in place and the same cached
@@ -93,7 +109,14 @@ func cloneTrace(t *Trace) *Trace {
 func cachePut(key string, tr *Trace) {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
-	cache[key] = cacheEntry{trace: tr, at: time.Now()}
+	// Zero-message traces get a shorter TTL — a transient reason (tshark
+	// missing, permission race with the daily rotation, deploy-in-progress)
+	// shouldn't stick a "0 packets" result for the full 24h TTL.
+	ttl := cacheTTL
+	if tr == nil || len(tr.Messages) == 0 {
+		ttl = emptyCacheTTL
+	}
+	cache[key] = cacheEntry{trace: tr, at: time.Now(), ttl: ttl}
 	// Cheap purge: if the map is getting big, drop expired entries.
 	if len(cache) > 256 {
 		cutoff := time.Now().Add(-cacheTTL)
