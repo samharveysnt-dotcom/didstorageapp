@@ -298,6 +298,11 @@ stage "Install Debian packages"
 remote_script <<'PKG_EOF'
 set -e
 export DEBIAN_FRONTEND=noninteractive
+# tshark asks a debconf question ("Should non-superusers be able to capture
+# packets?") that would hang an unattended install. Answer "no" up front —
+# we run tshark as root inside the didapi process, non-root capture isn't
+# needed.
+echo 'wireshark-common wireshark-common/install-setuid boolean false' | debconf-set-selections
 apt-get update -qq
 # postgresql-15 is the default in bookworm. Asterisk is NOT in Debian 12
 # repos any more — we build it from source in the next stage. Everything
@@ -307,7 +312,7 @@ apt-get install -y --no-install-recommends \
   postgresql postgresql-contrib \
   redis-server \
   ffmpeg sox \
-  tcpdump sngrep iproute2 \
+  tcpdump tshark sngrep iproute2 \
   jq rsync ufw \
   vim less \
   build-essential pkg-config autoconf libtool subversion \
