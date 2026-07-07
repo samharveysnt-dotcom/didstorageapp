@@ -492,12 +492,21 @@ if (( SKIP_VERIFY )); then
 else
   stage "Verify"
 
+  # /login returns 200 once an admin exists, and 302 → /setup on a fresh
+  # install (first-run flow). Both are healthy — anything else is a fail.
   http=$(remote 'curl -s -o /dev/null -w "%{http_code}" http://localhost/login' || echo 000)
-  if [[ "$http" == "200" ]]; then
-    ok "GET /login → 200"
-  else
-    errln "GET /login → $http (expected 200)"; exit 7
-  fi
+  case "$http" in
+    200) ok "GET /login → 200 (admin exists)" ;;
+    302)
+      loc=$(remote 'curl -s -o /dev/null -w "%{redirect_url}" http://localhost/login' || echo "")
+      if [[ "$loc" == *"/setup"* ]]; then
+        ok "GET /login → 302 → /setup (fresh install; visit /setup to create admin)"
+      else
+        errln "GET /login → 302 but redirect target unexpected: $loc"; exit 7
+      fi
+      ;;
+    *) errln "GET /login → $http (expected 200 or 302)"; exit 7 ;;
+  esac
 
   if remote 'systemctl is-active asterisk >/dev/null'; then
     # pjsip show transports format varies between Asterisk versions; some
