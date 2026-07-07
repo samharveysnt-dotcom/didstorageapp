@@ -173,15 +173,36 @@ chmod 600 /root/.ssh/authorized_keys
 
 touch /root/.ssh/known_hosts
 chmod 600 /root/.ssh/known_hosts
+# Pre-seed known_hosts so ssh doesn't prompt "authenticity of host ..." on
+# the first connect. Wrap in `|| true` because ssh-keyscan under `set -e -o
+# pipefail` will silently exit the whole script if the daemon isn't up yet
+# on this VM's first-boot timing.
 for h in localhost 127.0.0.1; do
-  ssh-keyscan -H "$h" 2>/dev/null | while read -r line; do
-    grep -qxF "$line" /root/.ssh/known_hosts || echo "$line" >> /root/.ssh/known_hosts
-  done
+  keyscan_out="$(ssh-keyscan -H -T 5 "$h" 2>/dev/null || true)"
+  if [[ -n "$keyscan_out" ]]; then
+    while IFS= read -r line; do
+      grep -qxF "$line" /root/.ssh/known_hosts 2>/dev/null || echo "$line" >> /root/.ssh/known_hosts
+    done <<<"$keyscan_out"
+  fi
 done
 
-if ! ssh -i /root/.ssh/id_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 \
+# Bypass strict host key checking on this first probe — if sshd hasn't yet
+# published a host key (or ssh-keyscan couldn't reach it), the connection
+# would otherwise fail here even when the key auth would work.
+if ! ssh -i /root/.ssh/id_ed25519 \
+      -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 \
+      -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts \
       root@127.0.0.1 'echo ok' >/dev/null 2>&1; then
-  die "ssh root@127.0.0.1 with the just-generated key doesn't work. Check sshd is running."
+  # Give sshd a moment in case it was mid-restart, then retry once with
+  # verbose output so the operator sees why it failed.
+  systemctl is-active ssh >/dev/null 2>&1 || systemctl start ssh || true
+  sleep 2
+  if ! ssh -i /root/.ssh/id_ed25519 \
+        -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 \
+        -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts \
+        root@127.0.0.1 'echo ok'; then
+    die "ssh root@127.0.0.1 with the just-generated key still doesn't work. Check 'systemctl status ssh' and 'journalctl -u ssh -n 40'."
+  fi
 fi
 ok "ssh root@127.0.0.1 works"
 
