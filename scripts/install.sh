@@ -69,21 +69,64 @@ fi
 ok "PUBLIC_IP=${PUBLIC_IP}"
 
 # ─────────────────────────────────────────────────────────────
-# Step 3 — Install prerequisites (git first so we can clone;
-# sudo + openssh-server because bootstrap.sh is an SSH-based
-# deployer that shells out through sudo on the target box —
-# minimal netinstalls of Debian ship with neither)
+# Step 3 — Install prerequisites
+#
+# git, sudo, openssh-server:  bootstrap.sh is an SSH-based deployer
+#     that shells out via sudo; minimal netinstalls of Debian 12
+#     ship with none of them.
+# tar, ca-certificates, curl: fetching the Go tarball.
+# Go 1.22:  Debian 12's apt golang-go is 1.19, which lacks log/slog
+#     and slices (both Go 1.21+). We fetch a pinned upstream tarball
+#     to /usr/local/go and PATH it in.
 # ─────────────────────────────────────────────────────────────
-step "Install prerequisites: git, golang, tar, ca-certificates, sudo, openssh-server"
+step "Install prerequisites: git, tar, ca-certificates, curl, sudo, openssh-server"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq git golang-go tar ca-certificates sudo openssh-server >/dev/null
+apt-get install -y -qq git tar ca-certificates curl sudo openssh-server >/dev/null
 systemctl enable --now ssh >/dev/null 2>&1 || systemctl enable --now sshd >/dev/null 2>&1 || true
-ok "$(go version 2>/dev/null || echo 'go missing')"
 ok "$(git --version)"
 ok "$(sudo --version | head -1)"
 ok "sshd active: $(systemctl is-active ssh 2>/dev/null || systemctl is-active sshd 2>/dev/null || echo unknown)"
+
+step "Install Go 1.22 to /usr/local/go (apt's golang-go is 1.19, too old for log/slog)"
+
+GO_VERSION="${GO_VERSION:-1.22.10}"
+GO_ARCH="linux-amd64"
+GO_TARBALL="go${GO_VERSION}.${GO_ARCH}.tar.gz"
+
+if [[ -x /usr/local/go/bin/go ]] && /usr/local/go/bin/go version | grep -q "go${GO_VERSION}"; then
+  ok "go ${GO_VERSION} already installed at /usr/local/go"
+else
+  rm -rf /usr/local/go
+  curl -fsSL -o "/tmp/${GO_TARBALL}" "https://go.dev/dl/${GO_TARBALL}"
+  tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"
+  rm -f "/tmp/${GO_TARBALL}"
+  ok "installed $(/usr/local/go/bin/go version)"
+fi
+
+# Make /usr/local/go/bin available to this script AND to bootstrap.sh's
+# ssh session below (SendEnv PATH doesn't work with a default sshd config,
+# so we prepend to PATH here and rely on the fact that install.sh invokes
+# bootstrap.sh in the same shell — bootstrap.sh then uses `go` locally
+# during its Stage [03] build).
+export PATH="/usr/local/go/bin:${PATH}"
+# Persist for future logins too — helps when the operator sshs back in
+# and wants to run `go` or re-run bootstrap manually.
+if ! grep -q '/usr/local/go/bin' /etc/profile.d/go.sh 2>/dev/null; then
+  echo 'export PATH="/usr/local/go/bin:$PATH"' > /etc/profile.d/go.sh
+  chmod 0644 /etc/profile.d/go.sh
+fi
+# Make sure the ssh-to-localhost session also picks up /usr/local/go/bin.
+# The default sshd on Debian sources /etc/environment, so drop it there.
+if ! grep -q '/usr/local/go/bin' /etc/environment 2>/dev/null; then
+  # /etc/environment expects KEY="VALUE" lines with no `export`.
+  if grep -q '^PATH=' /etc/environment 2>/dev/null; then
+    sed -i 's|^PATH="\(.*\)"$|PATH="/usr/local/go/bin:\1"|' /etc/environment
+  else
+    echo 'PATH="/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' >> /etc/environment
+  fi
+fi
 
 # ─────────────────────────────────────────────────────────────
 # Step 4 — Get the source (git clone or reuse existing checkout)
