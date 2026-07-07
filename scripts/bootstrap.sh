@@ -577,6 +577,10 @@ else
     | "${SSH[@]}" "$TARGET" 'sudo tar -C /etc/systemd/system -xzf - && \
                              chmod 0644 /etc/systemd/system/{didapi,didbill,sip-capture}.service && \
                              systemctl daemon-reload'
+  # sip-capture writes the pcaps that back the CDR sip-trace UI. Enable it
+  # now so it's up from the first call — didapi (Stage 8+) and asterisk
+  # (Stage 10b) are started elsewhere.
+  remote 'sudo systemctl enable --now sip-capture' >/dev/null 2>&1 || warn "could not enable sip-capture"
 fi
 ok "didapi.service + didbill.service + sip-capture.service installed"
 
