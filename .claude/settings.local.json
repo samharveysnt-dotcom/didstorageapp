@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "MultiEdit(*)",
+      "Task(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "LS(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "mcp__*",
+      "Bash(\"/c/Program Files/PostgreSQL/16/bin/psql.exe\" -U postgres -d exposurecheck -c \"SELECT column_name FROM information_schema.columns WHERE table_name='scans' ORDER BY ordinal_position;\")",
+      "mcp__Claude_Preview__preview_start"
+    ]
+  }
+}

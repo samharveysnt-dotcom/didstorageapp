@@ -1,0 +1,45 @@
+{{define "content"}}
+<div class="actions-bar">
+  <h1 style="margin:0">Denied calls <span class="muted" style="font-size:14px;font-weight:500"><span data-filter-count="denied-tbody">{{.Total}}</span></span></h1>
+  <span class="muted" style="font-size:13px">unauthorized_ip / unknown_did. Admin-only, never billed.</span>
+</div>
+
+<form class="toolbar-band is-stack" onsubmit="event.preventDefault()"
+      oninput="clientFilterTable('denied-tbody', this.elements.q.value, {reason: this.elements.freason.value})">
+  <div class="row">
+    <input class="grow" name="q" type="search" placeholder="Filter visible rows by source IP, To, From, or call-id">
+    <select name="freason">
+      <option value="">Any reason</option>
+      <option value="unauthorized_ip">unauthorized_ip</option>
+      <option value="unknown_did">unknown_did</option>
+      <option value="bad_to_uri">bad_to_uri</option>
+      <option value="bad_src_ip">bad_src_ip</option>
+    </select>
+    <button type="reset" class="ghost" onclick="setTimeout(function(){document.querySelector('.toolbar-band').dispatchEvent(new Event('input',{bubbles:true}));},0)">Reset</button>
+  </div>
+  <div class="row">
+    <span class="muted" style="font-size:12px">Filters narrow the visible rows in this retention window. Adjust retention in <a class="link" href="/settings" style="margin-left:.25rem">Settings</a>.</span>
+  </div>
+</form>
+
+{{if .Calls}}
+<table>
+<thead><tr><th>When</th><th>Reason</th><th>Source IP</th><th>To</th><th>From</th><th>Call-ID</th><th></th></tr></thead>
+<tbody id="denied-tbody">
+{{range .Calls}}
+<tr data-reason="{{.Reason}}">
+  <td class="muted">{{.Created}}</td>
+  <td><span class="pill pill-suspended">{{.Reason}}</span></td>
+  <td><code>{{.SrcIP}}</code></td>
+  <td>{{sipcaller .ToURI}}</td>
+  <td>{{if .FromURI}}{{sipcaller .FromURI}}{{else}}—{{end}}</td>
+  <td class="muted"><code>{{.CallID}}</code></td>
+  <td class="right"><a class="link" href="/cdrs/{{.CallID}}/sip-trace">{{icon "external"}}trace</a></td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<div class="empty-state">No denied traffic inside the current retention window. Nothing is hitting the platform that fails authorise.</div>
+{{end}}
+{{end}}

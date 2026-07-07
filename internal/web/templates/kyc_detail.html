@@ -1,0 +1,118 @@
+{{define "content"}}
+<div class="actions-bar">
+  <h1 style="margin:0">KYC bundle #{{.Bundle.ID}} <span class="muted" style="font-size:14px">· {{.Bundle.Type}}</span></h1>
+  <a class="link" href="/users/{{.Bundle.UserID}}">{{icon "arrow-left"}}back to user · {{.Bundle.UserRef}}</a>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="label">Status</div>
+    <div class="value" style="font-size:1.1rem"><span class="pill pill-{{.Bundle.Status}}">{{.Bundle.Status}}</span></div>
+    <div class="sub">
+      {{if eq .Bundle.Status "approved"}}approved {{.Bundle.Approved}} by {{.Bundle.ApprovedBy}}
+      {{else if eq .Bundle.Status "rejected"}}rejected {{.Bundle.Rejected}}
+      {{else}}awaiting admin review{{end}}
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">Created</div>
+    <div class="value" style="font-size:1.1rem">{{.Bundle.Created}}</div>
+    <div class="sub">{{len .Docs}} document(s)</div>
+  </div>
+</div>
+
+{{if .Bundle.Reason}}
+<div class="section" style="border-color:var(--err)">
+  <h2 style="color:var(--err)">Rejection reason</h2>
+  <p style="margin:0">{{.Bundle.Reason}}</p>
+</div>
+{{end}}
+
+<div class="section">
+  <h2>Documents</h2>
+  {{if .Docs}}
+  <table>
+  <thead><tr><th>Kind</th><th>Filename</th><th>Type</th><th>Size</th><th>Uploaded</th><th></th></tr></thead>
+  <tbody>
+  {{range .Docs}}
+    <tr>
+      <td>{{.Kind}}</td>
+      <td><code>{{.Filename}}</code></td>
+      <td class="muted">{{.MimeType}}</td>
+      <td class="muted">{{.SizeBytes}} B</td>
+      <td class="muted">{{.Uploaded}}</td>
+      <td class="right">
+        <a class="link" href="/kyc-bundles/{{$.Bundle.ID}}/documents/{{.ID}}/download" target="_blank">{{icon "external"}}view</a>
+        <form method="post" action="/kyc-bundles/{{$.Bundle.ID}}/documents/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete this document?')">
+          <button class="btn-danger">delete</button>
+        </form>
+      </td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}
+  <p class="muted">No documents uploaded yet.</p>
+  {{end}}
+
+  <h2 style="margin-top:1.2rem;font-size:13px">+ Upload a document</h2>
+  <form method="post" action="/kyc-bundles/{{.Bundle.ID}}/documents" enctype="multipart/form-data">
+    <div class="fieldgrid">
+      <div class="field"><label class="label">Kind</label>
+        <select name="kind">
+          <option value="id_front">id_front</option>
+          <option value="id_back">id_back</option>
+          <option value="passport">passport</option>
+          <option value="address_proof">address_proof</option>
+          <option value="company_registration">company_registration</option>
+          <option value="other">other</option>
+        </select>
+      </div>
+      <div class="field"><label class="label">File (max 25 MB)</label>
+        <input type="file" name="file" required>
+      </div>
+    </div>
+    <button>Upload</button>
+  </form>
+</div>
+
+<div class="section">
+  <h2>Bundle info</h2>
+  <pre style="margin:0;background:#0d1117;padding:.7rem;border-radius:6px;font-size:12px;overflow:auto">{{.Bundle.Info}}</pre>
+  {{if .Bundle.Notes}}<p class="muted" style="font-size:12px;margin-top:.5rem">Notes: {{.Bundle.Notes}}</p>{{end}}
+</div>
+
+<div class="section">
+  <h2>Decision</h2>
+  {{if eq .Bundle.Status "pending"}}
+  <div class="row-actions">
+    <form method="post" action="/kyc-bundles/{{.Bundle.ID}}/approve" style="display:inline" onsubmit="return confirm('Approve this bundle? Any kyc_pending orders referencing it will activate.')">
+      <button>Approve bundle</button>
+    </form>
+    <button class="btn-warn modal-trigger" onclick="openModal('reject-modal')">Reject bundle…</button>
+  </div>
+  {{else if eq .Bundle.Status "rejected"}}
+  <p class="muted">Already rejected. You can still <form method="post" action="/kyc-bundles/{{.Bundle.ID}}/approve" style="display:inline">{{""}}<button class="ghost">approve instead</button></form>.</p>
+  {{else}}
+  <p class="muted">Already approved. <button class="btn-warn modal-trigger" onclick="openModal('reject-modal')">Revoke (mark rejected)…</button></p>
+  {{end}}
+</div>
+
+<dialog id="reject-modal">
+  <div class="modal-head">
+    <h3>Reject KYC bundle #{{.Bundle.ID}}</h3>
+    <button class="close" type="button" aria-label="Close dialog" onclick="closeModal('reject-modal')">×</button>
+  </div>
+  <form method="post" action="/kyc-bundles/{{.Bundle.ID}}/reject">
+    <div class="modal-body">
+      <div class="field">
+        <label class="label">Reason (recorded in compliance log)</label>
+        <textarea name="reason" required rows="3" placeholder="e.g. ID is not legible / address proof older than 3 months"></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('reject-modal')">Cancel</button>
+      <button type="submit" class="btn-danger">Reject bundle</button>
+    </div>
+  </form>
+</dialog>
+{{end}}

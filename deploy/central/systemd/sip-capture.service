@@ -1,0 +1,19 @@
+[Unit]
+Description=Persistent SIP packet capture for CDR sip-trace API
+After=network.target
+
+[Service]
+Type=simple
+User=root
+# Capture UDP 5060+5061 to rotating pcap files, daily rotation, keep 7 files (~7 days).
+# %%Y / %%m / %%d become Y/m/d at runtime (systemd needs %% to escape).
+ExecStartPre=/bin/mkdir -p /var/lib/didstorage/sip-traces
+ExecStart=/usr/bin/tcpdump -i any -n -s 0 -W 7 -G 86400 \
+  -w /var/lib/didstorage/sip-traces/sip-%%Y%%m%%d.pcap \
+  -Z root \
+  "(udp port 5060 or udp port 5061) and not ip6"
+Restart=always
+RestartSec=4
+
+[Install]
+WantedBy=multi-user.target

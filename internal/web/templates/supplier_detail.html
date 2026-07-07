@@ -1,0 +1,841 @@
+{{/* Live preview block, embedded in both the create and edit rate modals.
+     Argument is a prefix string ("rm" or "re") matching the input IDs in the
+     surrounding form so one shared JS function can target the right inputs
+     and tables. */}}
+{{define "rate-preview"}}
+  {{$p := .}}
+  <div class="rate-preview">
+    <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem">
+      <h2 style="font-size:11px;margin:0">Live preview</h2>
+      <span class="muted" style="font-size:11px">updates as you type</span>
+    </div>
+
+    {{/* Tight-but-symmetric table styling. The two preview tables share
+         CSS via the .rmg-tbl class so all the cells, padding, and fonts
+         stay consistent — and crucially the wide 10-column monthly grid
+         fits inside the right column without horizontal scroll. */}}
+    <style>
+      .rmg-tbl{width:100%;table-layout:fixed;font-size:10px;font-variant-numeric:tabular-nums;border-collapse:collapse}
+      .rmg-tbl th,.rmg-tbl td{padding:.22rem .3rem;border-bottom:1px solid var(--border);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .rmg-tbl th{color:var(--muted);text-transform:uppercase;font-size:9px;letter-spacing:.4px;font-weight:500}
+      .rmg-tbl th.lead,.rmg-tbl td.lead{text-align:left}
+      .rmg-tbl th.num,.rmg-tbl td.num{text-align:right}
+      .rmg-tbl .grp-end{border-right:1px solid var(--border)}
+      .rmg-tbl .empty{text-align:center;color:var(--muted);padding:.4rem .5rem}
+      .rmg-h3{font:600 10px ui-sans-serif;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin:.4rem 0 .2rem}
+    </style>
+
+    <h3 class="rmg-h3">Per-call profit (sweep durations)</h3>
+    <table id="{{$p}}-pv-call" class="rmg-tbl">
+      <thead>
+        <tr>
+          <th class="lead">Duration</th>
+          <th class="num">Sell</th>
+          <th class="num">Cost</th>
+          <th class="num">Profit</th>
+        </tr>
+      </thead>
+      <tbody><tr><td colspan="4" class="empty">enter rates above to see preview</td></tr></tbody>
+    </table>
+
+    <h3 class="rmg-h3" style="margin-top:.7rem">First-month total — NRC + MRC + channel surcharge</h3>
+    <table id="{{$p}}-pv-month" class="rmg-tbl">
+      <thead>
+        <tr>
+          <th rowspan="2" class="lead">Ch</th>
+          <th colspan="3" class="num grp-end" style="text-align:center;border-right-color:var(--border)">1 DID</th>
+          <th colspan="3" class="num grp-end" style="text-align:center;border-right-color:var(--border)">5 DIDs</th>
+          <th colspan="3" class="num"         style="text-align:center">10 DIDs</th>
+        </tr>
+        <tr>
+          <th class="num">Sell</th>
+          <th class="num">Cost</th>
+          <th class="num grp-end">Profit</th>
+          <th class="num">Sell</th>
+          <th class="num">Cost</th>
+          <th class="num grp-end">Profit</th>
+          <th class="num">Sell</th>
+          <th class="num">Cost</th>
+          <th class="num">Profit</th>
+        </tr>
+      </thead>
+      <tbody><tr><td colspan="10" class="empty">enter rates above</td></tr></tbody>
+    </table>
+    <p class="muted" style="font-size:10px;margin:.4rem 0 0">{{icon "info"}} Customer billed 60/60 (whole minutes, ceil); supplier uses the bill cycle above. Channel surcharge applies above 2 channels (the base) at the customer's per-channel monthly rate.</p>
+  </div>
+{{end}}
+
+{{define "content"}}
+<style>
+  .stabs{display:flex;flex-wrap:wrap;gap:.2rem;border-bottom:1px solid var(--border);margin-bottom:1.2rem}
+  .stabs a{padding:.55rem 1rem;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;font-size:13px;font-weight:500;cursor:pointer}
+  .stabs a:hover{color:var(--text)}
+  .stabs a.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .spane{display:none}
+  .spane.active{display:block}
+  .margin-bar{display:flex;align-items:center;gap:.4rem;font-size:11.5px}
+  .margin-bar .bar{display:inline-block;height:6px;background:var(--ok);border-radius:3px;min-width:1px}
+  .margin-bar .bar.loss{background:var(--err)}
+</style>
+
+<div class="actions-bar">
+  <h1 style="margin:0">Supplier · {{.Supplier.Name}} <span class="muted" style="font-size:14px">#{{.Supplier.ID}}</span></h1>
+  <div class="row-actions">
+    <button class="modal-trigger" onclick="openModal('sup-edit-modal')">{{icon "edit"}}Edit details</button>
+    <a class="link" href="/suppliers">{{icon "arrow-left"}}all suppliers</a>
+  </div>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="label">Status</div>
+    <div class="value" style="font-size:1.1rem"><span class="pill pill-{{.Supplier.Status}}">{{.Supplier.Status}}</span></div>
+    <div class="sub">DIDs imported: {{.DIDCount}}</div>
+  </div>
+  <div class="card">
+    <div class="label">IP groups</div>
+    <div class="value">{{len .Groups}}</div>
+    <div class="sub">whitelisted source IPs for inbound INVITEs</div>
+  </div>
+  <div class="card">
+    <div class="label">Rate cards</div>
+    <div class="value">{{len .RateGroups}}</div>
+    <div class="sub">per (country, did_type) pair</div>
+  </div>
+</div>
+
+<div class="stabs" id="sup-tabs">
+  <a data-tab="ips"   class="active" onclick="showSupTab(event,'ips')">{{icon "globe"}}IP whitelisting <span class="muted">({{len .Groups}})</span></a>
+  <a data-tab="rates" onclick="showSupTab(event,'rates')">{{icon "phone"}}Rate cards <span class="muted">({{len .RateGroups}})</span></a>
+  <a data-tab="dids"  onclick="showSupTab(event,'dids')">{{icon "external"}}DIDs ({{.DIDCount}})</a>
+</div>
+
+<!-- ============================================================ IP whitelisting -->
+<div class="spane active" data-tab="ips">
+  <div class="actions-bar">
+    <h2 style="margin:0">IP groups</h2>
+    <button class="modal-trigger" onclick="openModal('grp-modal')">{{icon "plus"}}New group</button>
+  </div>
+
+  {{if .Groups}}
+  {{range .Groups}}
+    <div class="section">
+      <div class="actions-bar" style="margin-bottom:.6rem">
+        <h2 style="margin:0;font-size:1rem">{{.Name}} <span class="muted" style="font-size:12px">· {{len .Members}} ip(s)</span></h2>
+        <div class="row-actions">
+          <button class="ghost" onclick="openGroupRename({{.ID}}, '{{js .Name}}', {{$.Supplier.ID}})">{{icon "edit"}}rename</button>
+          <button onclick="openBulkAdd({{.ID}}, '{{js .Name}}', {{$.Supplier.ID}})">{{icon "plus"}}Add IPs (bulk)</button>
+          <form method="post" action="/suppliers/{{$.Supplier.ID}}/ip-groups/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete group {{.Name}} and its {{len .Members}} IPs?')">
+            <button class="btn-danger">{{icon "trash"}}delete</button>
+          </form>
+        </div>
+      </div>
+      {{if .Members}}
+      <table>
+        <thead><tr><th>Match</th><th>Kind</th><th></th></tr></thead>
+        <tbody>
+        {{range .Members}}
+          <tr>
+            <td><code>{{.Display}}</code></td>
+            <td class="muted" style="font-size:11.5px;text-transform:uppercase;letter-spacing:.04em">{{.Kind}}</td>
+            <td class="right">
+              <button class="ghost" onclick="openIPEdit({{$.Supplier.ID}}, {{$.ID}}, {{.ID}}, '{{js .Display}}')">{{icon "edit"}}edit</button>
+              <form method="post" action="/suppliers/{{$.Supplier.ID}}/ip-groups/{{$.ID}}/ips/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Remove {{.Display}}?')">
+                <button class="btn-danger">{{icon "trash"}}remove</button>
+              </form>
+            </td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="muted" style="margin:0">No IPs yet — click <em>Add IPs (bulk)</em> to paste a list.</p>
+      {{end}}
+    </div>
+  {{end}}
+  {{else}}
+  <p class="muted">No IP groups yet. Create one and add the supplier's signalling IPs.</p>
+  {{end}}
+</div>
+
+<!-- ============================================================ Rate cards -->
+<div class="spane" data-tab="rates">
+  <style>
+    .country-card{background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:.6rem;overflow:hidden}
+    .country-head{display:flex;align-items:center;gap:.8rem;padding:.7rem 1rem;cursor:pointer;user-select:none;background:#0d1117;border-bottom:1px solid transparent}
+    .country-head:hover{background:#161b22}
+    .country-flag{font-size:22px;line-height:1}
+    .country-name{font-weight:600;font-size:14px}
+    .country-iso{color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.5px}
+    .country-counter{margin-left:auto;display:inline-flex;gap:.4rem;align-items:center;color:var(--muted);font-size:12px}
+    .country-counter .pill{background:rgba(47,129,247,.12);color:var(--accent);padding:.2rem .55rem;border-radius:10px;font-weight:600}
+    .country-card.expanded .country-head{border-bottom-color:var(--border)}
+    .country-card .country-body{display:none;padding:.6rem}
+    .country-card.expanded .country-body{display:block}
+    .country-card .chev{transition:transform .15s}
+    .country-card.expanded .chev{transform:rotate(90deg)}
+
+    .rate-row{border:1px solid var(--border);border-radius:6px;background:#0d1117;margin:.4rem 0;overflow:hidden}
+    .rate-row-head{display:flex;align-items:center;gap:.6rem;padding:.55rem .8rem;cursor:pointer;user-select:none}
+    .rate-row-head:hover{background:#161b22}
+    .rate-row.expanded .rate-row-head{border-bottom:1px solid var(--border)}
+    .rate-row .kind-pill{background:rgba(63,185,80,.12);color:var(--ok);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;padding:.2rem .55rem;border-radius:4px}
+    .rate-row .quick{margin-left:auto;display:flex;gap:1.2rem;font-size:12.5px;color:var(--muted)}
+    .rate-row .quick .num{color:var(--text);font-weight:500}
+    .rate-row .quick .profit-good{color:var(--ok)}
+    .rate-row .quick .profit-bad{color:var(--err)}
+    .rate-row-body{display:none;padding:.7rem 1rem;font-size:13px}
+    .rate-row.expanded .rate-row-body{display:block}
+    .rate-card-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6rem 1.2rem;margin-bottom:.7rem}
+    .rate-card-grid .pair{display:flex;justify-content:space-between;border-bottom:1px dotted var(--border);padding:.2rem 0}
+    .rate-card-grid .pair .k{color:var(--muted);font-size:11.5px}
+    .rate-card-grid .pair .v{font-weight:500}
+    .profit-table{width:100%;border-collapse:collapse;font-size:12.5px}
+    .profit-table th,.profit-table td{padding:.35rem .5rem;border-bottom:1px solid var(--border);text-align:right}
+    .profit-table th{color:var(--muted);text-transform:uppercase;font-size:10.5px;letter-spacing:.5px;font-weight:500;text-align:right}
+    .profit-table th:first-child,.profit-table td:first-child{text-align:left}
+    .badge-active{background:rgba(63,185,80,.15);color:var(--ok);font-size:10.5px;padding:.15rem .45rem;border-radius:4px;text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+    .badge-expired{background:rgba(139,148,158,.15);color:var(--muted);font-size:10.5px;padding:.15rem .45rem;border-radius:4px;text-transform:uppercase;letter-spacing:.4px}
+
+    /* Two-column rate-modal layout: inputs on the left, live preview on
+       the right with a visual divider between them. Falls back to a single
+       column on narrow viewports. */
+    .rate-modal-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1.6rem}
+    .rate-modal-grid > .rmg-preview{border-left:1px solid var(--border);padding-left:1.4rem}
+    @media (max-width: 880px){
+      .rate-modal-grid{grid-template-columns:1fr;gap:1rem}
+      .rate-modal-grid > .rmg-preview{border-left:0;border-top:1px solid var(--border);padding-left:0;padding-top:1rem}
+    }
+  </style>
+
+  <div class="actions-bar">
+    <h2 style="margin:0">Rate cards by country</h2>
+    <div class="row-actions">
+      <button onclick="openModal('rate-modal')">{{icon "plus"}}New rate card</button>
+      <button class="ghost" onclick="openModal('rate-bulk-modal')">{{icon "plus"}}Bulk import</button>
+    </div>
+  </div>
+
+  {{if .RateGroups}}
+  {{range .RateGroups}}
+    <div class="country-card" id="cc-{{.ISO}}">
+      <div class="country-head" onclick="toggleCountry(this.parentNode)">
+        <span class="chev muted">{{icon "arrow-right"}}</span>
+        <span class="country-flag">{{if .FlagEmoji}}{{.FlagEmoji}}{{else}}🌐{{end}}</span>
+        <div>
+          <div class="country-name">{{if .Name}}{{.Name}}{{else}}{{.ISO}}{{end}}</div>
+          <div class="country-iso">{{.ISO}}</div>
+        </div>
+        <span class="country-counter">
+          <span class="pill">{{.Active}}</span>
+          {{if .Active}}active{{else}}<em>no active rate</em>{{end}}{{if gt .Total .Active}}&nbsp;·&nbsp;{{sub .Total .Active}} expired{{end}}
+        </span>
+      </div>
+      <div class="country-body">
+        {{range .Cards}}
+        <div class="rate-row">
+          <div class="rate-row-head" onclick="toggleRateRow(this.parentNode)">
+            <span class="muted">{{icon "arrow-right"}}</span>
+            <span class="kind-pill">{{didtype .DIDType}}</span>
+            {{if .Active}}<span class="badge-active">active</span>{{else}}<span class="badge-expired">expired {{.ValidTo}}</span>{{end}}
+            <span class="quick">
+              <span><span class="muted">customer</span> <span class="num">${{printf "%.4f" .PerMinDollars}}/min</span></span>
+              <span><span class="muted">supplier</span> <span class="num">${{printf "%.4f" .SupPerMinDollars}}/min</span></span>
+              <span><span class="muted">margin</span> <span class="num {{if lt .PerMinMargin 0.0}}profit-bad{{else}}profit-good{{end}}">${{printf "%.4f" .PerMinMargin}}/min{{if gt .MarginPct 0.0}} ({{printf "%.0f" .MarginPct}}%){{end}}</span></span>
+              <span class="muted" title="Customer billing increment — how WE round each call when invoicing the customer (min/inc seconds).">customer bill {{if .BillMin}}{{.BillMin}}/{{.BillInc}}{{else}}60/60{{end}}</span>
+              <span class="muted" title="Supplier billing increment — how the supplier rounds each call when invoicing us.">supplier bill {{if .SupBillMin}}{{.SupBillMin}}/{{.SupBillInc}}{{else}}60/60{{end}}</span>
+            </span>
+          </div>
+          <div class="rate-row-body">
+            <div class="rate-card-grid">
+              <div class="pair"><span class="k">Customer per-min</span><span class="v">${{printf "%.4f" .PerMinDollars}}</span></div>
+              <div class="pair"><span class="k">Customer NRC</span><span class="v">${{printf "%.2f" .NRCDollars}}</span></div>
+              <div class="pair"><span class="k">Customer MRC</span><span class="v">${{printf "%.2f" .MRCDollars}}</span></div>
+              <div class="pair"><span class="k">Supplier per-min</span><span class="v">${{printf "%.4f" .SupPerMinDollars}}</span></div>
+              <div class="pair"><span class="k">Supplier NRC</span><span class="v">${{printf "%.2f" .SupNRCDollars}}</span></div>
+              <div class="pair"><span class="k">Supplier MRC</span><span class="v">${{printf "%.2f" .SupMRCDollars}}</span></div>
+              <div class="pair"><span class="k">Per-min margin</span><span class="v {{if lt .PerMinMargin 0.0}}profit-bad{{else}}profit-good{{end}}">${{printf "%.4f" .PerMinMargin}}</span></div>
+              <div class="pair"><span class="k">NRC margin</span><span class="v {{if lt .NRCMargin 0.0}}profit-bad{{else}}profit-good{{end}}">${{printf "%.2f" .NRCMargin}}</span></div>
+              <div class="pair"><span class="k">MRC margin</span><span class="v {{if lt .MRCMargin 0.0}}profit-bad{{else}}profit-good{{end}}">${{printf "%.2f" .MRCMargin}}</span></div>
+            </div>
+
+            <h4 style="margin:.7rem 0 .3rem;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Estimated profit per call</h4>
+            <table class="profit-table">
+              <thead><tr><th>Duration</th><th>Customer</th><th>Supplier</th><th>Profit</th></tr></thead>
+              <tbody>
+              {{range .Samples}}
+                <tr>
+                  <td>{{compactDuration .Seconds}}</td>
+                  <td>${{printf "%.4f" .Customer}}</td>
+                  <td class="muted">${{printf "%.4f" .Supplier}}</td>
+                  <td class="{{if lt .Profit 0.0}}profit-bad{{else}}profit-good{{end}}">${{printf "%.4f" .Profit}}</td>
+                </tr>
+              {{end}}
+              </tbody>
+            </table>
+            <p class="muted" style="font-size:11.5px;margin:.5rem 0 .8rem">
+              {{icon "info"}} Customer is billed {{if .BillMin}}{{.BillMin}}/{{.BillInc}}{{else}}60/60{{end}}, supplier is billed
+              {{if .SupBillMin}}{{.SupBillMin}}/{{.SupBillInc}}{{else}}60/60{{end}} per the rate card. Profit at typical durations
+              shown above; for very long calls profit converges to ${{printf "%.4f" .PerMinMargin}}/min.
+            </p>
+
+            <div class="row-actions">
+              <span class="muted" style="font-size:12px">Valid: {{.ValidFrom}}{{if .ValidTo}} → {{.ValidTo}}{{end}}</span>
+              {{if .Active}}
+              <button onclick='openRateEdit({
+                id: {{.ID}},
+                country: {{js .Country | printf "%q"}},
+                country_name: {{js .CountryName | printf "%q"}},
+                did_type: {{js .DIDType | printf "%q"}},
+                per_minute: "{{printf "%.4f" .PerMinDollars}}",
+                nrc: "{{printf "%.2f" .NRCDollars}}",
+                mrc: "{{printf "%.2f" .MRCDollars}}",
+                channel: "{{printf "%.2f" .ChannelDollars}}",
+                bill_min: {{.BillMin}},
+                bill_inc: {{.BillInc}},
+                supplier_per_minute: "{{printf "%.4f" .SupPerMinDollars}}",
+                supplier_nrc: "{{printf "%.2f" .SupNRCDollars}}",
+                supplier_mrc: "{{printf "%.2f" .SupMRCDollars}}",
+                sup_bill_min: {{.SupBillMin}},
+                sup_bill_inc: {{.SupBillInc}}
+              })'>{{icon "edit"}}edit</button>
+              <form method="post" action="/rate-cards/{{.ID}}/expire" style="display:inline" onsubmit="return confirm('Expire this rate card? It stops applying to new orders.')">
+                <button class="btn-warn">{{icon "trash"}}expire</button>
+              </form>
+              {{end}}
+            </div>
+          </div>
+        </div>
+        {{end}}
+      </div>
+    </div>
+  {{end}}
+  <p class="muted" style="font-size:12px;margin-top:.6rem">
+    {{icon "info"}} One active rate card per (country, type) is allowed. Click a country to expand its rate cards, or click a rate row for full details and profit estimates.
+  </p>
+  {{else}}
+  <p class="muted">No rate cards yet. Add one — pick a country and DID type, then enter the rates this supplier charges + what you charge customers.</p>
+  {{end}}
+
+  <script>
+    function toggleCountry(card){ card.classList.toggle('expanded'); }
+    function toggleRateRow(row){ row.classList.toggle('expanded'); }
+    // Stop the rate-row click from bubbling up and re-toggling its parent country.
+    document.querySelectorAll('.rate-row-head').forEach(function(h){
+      h.addEventListener('click', function(e){ e.stopPropagation(); });
+    });
+  </script>
+</div>
+
+<!-- ============================================================ DIDs -->
+<div class="spane" data-tab="dids">
+  <p class="muted">{{.DIDCount}} DIDs from this supplier · <a class="link" href="/dids?q={{.Supplier.Name}}">{{icon "external"}}view in /dids</a> · <a class="link" href="/dids/import">{{icon "plus"}}import more</a></p>
+</div>
+
+<!-- ===== Modals ===== -->
+
+<dialog id="sup-edit-modal">
+  <div class="modal-head"><h3>Edit supplier</h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('sup-edit-modal')">×</button></div>
+  <form method="post" action="/suppliers/{{.Supplier.ID}}">
+    <div class="modal-body">
+      <div class="field"><label class="label">Name</label><input name="name" value="{{.Supplier.Name}}" required></div>
+      <div class="field"><label class="label">Status</label>
+        <select name="status">
+          <option value="active"   {{if eq .Supplier.Status "active"}}selected{{end}}>active</option>
+          <option value="inactive" {{if eq .Supplier.Status "inactive"}}selected{{end}}>inactive</option>
+        </select>
+      </div>
+      <div class="field"><label class="label">Notes</label><textarea name="notes" rows="3">{{.Supplier.Notes}}</textarea></div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('sup-edit-modal')">Cancel</button>
+      <button>Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="grp-modal">
+  <div class="modal-head"><h3>New IP group</h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('grp-modal')">×</button></div>
+  <form method="post" action="/suppliers/{{.Supplier.ID}}/ip-groups">
+    <div class="modal-body">
+      <div class="field"><label class="label">Name</label><input name="name" required placeholder="e.g. signalling-edge-2025" autofocus></div>
+      <p class="muted" style="font-size:12px;margin:.4rem 0 0">Groups let you organize IPs by purpose (signalling, RTP, backup site, etc.) without affecting routing — any IP in any group of the matching supplier authorizes the call.</p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('grp-modal')">Cancel</button>
+      <button>Create group</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="grp-rename-modal">
+  <div class="modal-head"><h3>Rename group <span id="grm-label" class="muted"></span></h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('grp-rename-modal')">×</button></div>
+  <form method="post" id="grm-form">
+    <div class="modal-body">
+      <div class="field"><label class="label">New name</label><input name="name" id="grm-name" required></div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('grp-rename-modal')">Cancel</button>
+      <button>Rename</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="ip-edit-modal">
+  <div class="modal-head"><h3>Edit match <span id="ipe-label" class="muted"></span></h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('ip-edit-modal')">×</button></div>
+  <form method="post" id="ipe-form">
+    <div class="modal-body">
+      <p class="muted" style="font-size:12.5px;margin-top:0">Editing is implemented as <strong>delete + add</strong> in one transaction. The Asterisk identify file is regenerated and PJSIP reloads automatically. You can also change the <em>kind</em> here — e.g. swap a bare IP for a hostname.</p>
+      <div class="field">
+        <label class="label">IP / CIDR / hostname</label>
+        <input name="cidr" id="ipe-cidr" required placeholder="217.154.45.58 or sip.didcomms.co.uk">
+        <span class="muted" style="font-size:11.5px;margin-top:.3rem;display:block">Bare IPs are stored as <code>/32</code>. Hostnames must contain a dot and only letters / digits / hyphens.</span>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('ip-edit-modal')">Cancel</button>
+      <button>Save (delete + re-add)</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="bulk-ip-modal" style="max-width:560px">
+  <div class="modal-head"><h3>Add matches to <span id="bia-label" class="muted"></span></h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('bulk-ip-modal')">×</button></div>
+  <form method="post" id="bia-form">
+    <div class="modal-body">
+      <p class="muted" style="font-size:12.5px;margin-top:0">Paste any mix of IPs, CIDRs, or SIP hostnames — separated by spaces, commas, or newlines. Bare IPs become <code>/32</code> automatically. Hostnames are resolved by PJSIP at every reload, so DNS changes are picked up without re-editing here.</p>
+      <div class="field"><label class="label">IPs / CIDRs / hostnames</label>
+        <textarea name="ips" rows="8" required placeholder="217.73.68.35
+217.73.68.36
+1.2.3.0/24
+sip.didcomms.co.uk"></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('bulk-ip-modal')">Cancel</button>
+      <button>Add IPs</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="rate-modal" style="max-width:1100px;width:96%">
+  <div class="modal-head"><h3>New rate card</h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('rate-modal')">×</button></div>
+  <form method="post" action="/suppliers/{{.Supplier.ID}}/rate-cards">
+    <div class="modal-body">
+      <div class="rate-modal-grid">
+        <div class="rmg-inputs">
+          <div class="hstack">
+            <div class="field"><label class="label">Country</label>
+              <select name="country_iso" id="rm-country" required onchange="rmRefreshTypes()">
+                <option value="">—</option>
+                {{range .Countries}}<option value="{{.ISO}}">{{.ISO}} · {{.Name}}</option>{{end}}
+              </select>
+            </div>
+            <div class="field"><label class="label">DID type
+              <span class="tip" data-tip="Types that already have an active rate card for this country are disabled — expire that card first if you want to replace it.">{{icon "info"}}</span>
+            </label>
+              <select name="did_type" id="rm-type" required>
+                <option value="local">Local</option>
+                <option value="national">National</option>
+                <option value="mobile">Mobile</option>
+                <option value="tollfree">Toll Free</option>
+              </select>
+            </div>
+          </div>
+          <p id="rm-type-hint" class="muted" style="font-size:11.5px;margin:.2rem 0 .4rem;display:none">
+            {{icon "info"}} <span></span>
+          </p>
+
+      <h2 style="font-size:11px;margin:.6rem 0 .3rem">What we charge the customer
+        <span class="tip" data-tip="How WE round the call when invoicing the customer (min/inc seconds). 60/60 = legacy whole-minute billing with a 60s connection minimum. 60/1 = 60s connection then per-second. 6/6 = 6s minimum and 6s increments. The increment is snapshotted on every CDR so historical billing isn't disturbed by later edits.">{{icon "info"}}</span>
+      </h2>
+      <div class="hstack">
+        <div class="field"><label class="label">Per-min ($)</label><input id="rm-pmin"     name="per_minute" type="number" step="0.0001" min="0" required oninput="recalcRatePreview('rm')"></div>
+        <div class="field"><label class="label">NRC ($)</label>    <input id="rm-nrc"      name="nrc"        type="number" step="0.01" min="0" required oninput="recalcRatePreview('rm')"></div>
+        <div class="field"><label class="label">MRC ($)</label>    <input id="rm-mrc"      name="mrc"        type="number" step="0.01" min="0" required oninput="recalcRatePreview('rm')"></div>
+        <div class="field"><label class="label">Channel/mo ($)</label><input id="rm-ch"   name="channel"    type="number" step="0.01" min="0" value="0" oninput="recalcRatePreview('rm')"></div>
+        <div class="field"><label class="label">Customer bill cycle
+          <span class="tip" data-tip="Customer-side billing increment. min/inc seconds — e.g. 60/60 = 60s connection + 60s round-up, 60/1 = 60s connection + per-second, 6/6 = 6s minimum and 6s increments.">{{icon "info"}}</span>
+          </label>
+          <select id="rm-cust-bill" onchange="document.getElementById('rm-cust-bill-min').value=this.value;document.getElementById('rm-cust-bill-inc').value=this.value;recalcRatePreview('rm')">
+            <option value="60">60/60 (legacy — whole minutes)</option>
+            <option value="30">30/30</option>
+            <option value="15">15/15</option>
+            <option value="6">6/6 (per 6 seconds)</option>
+            <option value="1">1/1 (per-second after 1s min)</option>
+          </select>
+          <input type="hidden" id="rm-cust-bill-min" name="bill_min_seconds"       value="60">
+          <input type="hidden" id="rm-cust-bill-inc" name="bill_increment_seconds" value="60">
+        </div>
+      </div>
+
+      <h2 style="font-size:11px;margin:.6rem 0 .3rem">What the supplier charges us
+        <span class="tip" data-tip="The fields below describe what THIS supplier charges US — including their billing increment, which can differ per supplier (1/1, 6/6, 30/30, 60/60, etc).">{{icon "info"}}</span>
+      </h2>
+      <div class="hstack">
+        <div class="field"><label class="label">Per-min ($)</label><input id="rm-sup-pmin" name="supplier_per_minute" type="number" step="0.0001" min="0" value="0" oninput="recalcRatePreview('rm')"></div>
+        <div class="field"><label class="label">NRC ($)</label>    <input id="rm-sup-nrc"  name="supplier_nrc"        type="number" step="0.01" min="0" value="0" oninput="recalcRatePreview('rm')"></div>
+        <div class="field"><label class="label">MRC ($)</label>    <input id="rm-sup-mrc"  name="supplier_mrc"        type="number" step="0.01" min="0" value="0" oninput="recalcRatePreview('rm')"></div>
+        <div class="field"><label class="label">Supplier bill cycle
+          <span class="tip" data-tip="How the supplier rounds the call when invoicing us. Examples: 1/1 = per-second, 6/6 = round each call up to the next 6 seconds, 60/60 = round each call up to whole minutes.">{{icon "info"}}</span>
+          </label>
+          <select id="rm-bill" onchange="document.getElementById('rm-bill-min').value=this.value;document.getElementById('rm-bill-inc').value=this.value;recalcRatePreview('rm')">
+            <option value="60">60/60 (rounded to whole minutes)</option>
+            <option value="30">30/30</option>
+            <option value="15">15/15</option>
+            <option value="6">6/6 (per-call billing)</option>
+            <option value="1">1/1 (per-second)</option>
+          </select>
+          <input type="hidden" id="rm-bill-min" name="supplier_bill_min_seconds"       value="60">
+          <input type="hidden" id="rm-bill-inc" name="supplier_bill_increment_seconds" value="60">
+        </div>
+      </div>
+        </div><!-- /rmg-inputs -->
+        <div class="rmg-preview">
+          {{template "rate-preview" "rm"}}
+        </div>
+      </div><!-- /rate-modal-grid -->
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('rate-modal')">Cancel</button>
+      <button>Add rate card</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="rate-edit-modal" style="max-width:1100px;width:96%">
+  <div class="modal-head">
+    <h3>Edit rate card <span id="re-label" class="muted"></span></h3>
+    <button class="close" type="button" aria-label="Close dialog" onclick="closeModal('rate-edit-modal')">×</button>
+  </div>
+  <form method="post" id="re-form">
+    <div class="modal-body">
+      <div class="rate-modal-grid">
+        <div class="rmg-inputs">
+          <p class="muted" style="font-size:12.5px;margin-top:0">
+            Country and DID type are locked — they identify the rate slot. To change those, expire this card and create a new one.
+          </p>
+          <div class="hstack">
+            <div class="field grow">
+              <label class="label">Country</label>
+              <input id="re-country-display" readonly>
+            </div>
+            <div class="field">
+              <label class="label">DID type</label>
+              <input id="re-type-display" readonly style="width:120px">
+            </div>
+          </div>
+
+      <h2 style="font-size:11px;margin:.6rem 0 .3rem">What we charge the customer
+        <span class="tip" data-tip="Customer-side billing increment. 60/60 = 60s connection minimum + 60s round-up. 60/1 = 60s minimum + per-second. 6/6 = 6s minimum + 6s increments. Snapshotted on every CDR — editing only affects future calls.">{{icon "info"}}</span>
+      </h2>
+      <div class="hstack">
+        <div class="field"><label class="label">Per-min ($)</label><input name="per_minute" id="re-pmin" type="number" step="0.0001" min="0" required oninput="recalcRatePreview('re')"></div>
+        <div class="field"><label class="label">NRC ($)</label>    <input name="nrc"        id="re-nrc"  type="number" step="0.01" min="0" required oninput="recalcRatePreview('re')"></div>
+        <div class="field"><label class="label">MRC ($)</label>    <input name="mrc"        id="re-mrc"  type="number" step="0.01" min="0" required oninput="recalcRatePreview('re')"></div>
+        <div class="field"><label class="label">Channel/mo ($)</label><input name="channel"  id="re-ch"   type="number" step="0.01" min="0" oninput="recalcRatePreview('re')"></div>
+        <div class="field">
+          <label class="label">Customer bill cycle
+            <span class="tip" data-tip="How WE round each call when invoicing the customer.">{{icon "info"}}</span>
+          </label>
+          <select id="re-cust-bill" onchange="document.getElementById('re-cust-bill-min').value=this.value;document.getElementById('re-cust-bill-inc').value=this.value;recalcRatePreview('re')">
+            <option value="60">60/60 (legacy — whole minutes)</option>
+            <option value="30">30/30</option>
+            <option value="15">15/15</option>
+            <option value="6">6/6 (per 6 seconds)</option>
+            <option value="1">1/1 (per-second after 1s min)</option>
+          </select>
+          <input type="hidden" name="bill_min_seconds"       id="re-cust-bill-min" value="60">
+          <input type="hidden" name="bill_increment_seconds" id="re-cust-bill-inc" value="60">
+        </div>
+      </div>
+
+      <h2 style="font-size:11px;margin:.6rem 0 .3rem">What the supplier charges us
+        <span class="tip" data-tip="The fields below describe what THIS supplier charges US.">{{icon "info"}}</span>
+      </h2>
+      <div class="hstack">
+        <div class="field"><label class="label">Per-min ($)</label><input name="supplier_per_minute" id="re-sup-pmin" type="number" step="0.0001" min="0" oninput="recalcRatePreview('re')"></div>
+        <div class="field"><label class="label">NRC ($)</label>    <input name="supplier_nrc"        id="re-sup-nrc"  type="number" step="0.01" min="0"   oninput="recalcRatePreview('re')"></div>
+        <div class="field"><label class="label">MRC ($)</label>    <input name="supplier_mrc"        id="re-sup-mrc"  type="number" step="0.01" min="0"   oninput="recalcRatePreview('re')"></div>
+        <div class="field">
+          <label class="label">Supplier bill cycle
+            <span class="tip" data-tip="How the supplier rounds the call when invoicing us.">{{icon "info"}}</span>
+          </label>
+          <select id="re-bill" onchange="document.getElementById('re-bill-min').value=this.value;document.getElementById('re-bill-inc').value=this.value;recalcRatePreview('re')">
+            <option value="60">60/60 (whole minutes)</option>
+            <option value="30">30/30</option>
+            <option value="15">15/15</option>
+            <option value="6">6/6 (per-call)</option>
+            <option value="1">1/1 (per-second)</option>
+          </select>
+          <input type="hidden" name="supplier_bill_min_seconds"       id="re-bill-min" value="60">
+          <input type="hidden" name="supplier_bill_increment_seconds" id="re-bill-inc" value="60">
+        </div>
+      </div>
+        </div><!-- /rmg-inputs -->
+        <div class="rmg-preview">
+          {{template "rate-preview" "re"}}
+        </div>
+      </div><!-- /rate-modal-grid -->
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('rate-edit-modal')">Cancel</button>
+      <button>{{icon "check"}}Save changes</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="rate-bulk-modal" style="max-width:760px">
+  <div class="modal-head"><h3>Bulk import rate cards</h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('rate-bulk-modal')">×</button></div>
+  <div class="modal-body">
+    <p class="muted" style="font-size:13px;margin-top:0">Paste a CSV with header row. Columns: <code>country, did_type, per_minute, nrc, mrc, channel, bill_min_seconds, bill_increment_seconds, supplier_per_minute, supplier_nrc, supplier_mrc, supplier_bill_min_seconds, supplier_bill_increment_seconds</code>. Numbers are dollars (not cents). All bill-seconds default to 60 if blank.</p>
+    <textarea id="rbm-csv" rows="10" placeholder="country,did_type,per_minute,nrc,mrc,channel,bill_min_seconds,bill_increment_seconds,supplier_per_minute,supplier_nrc,supplier_mrc,supplier_bill_min_seconds,supplier_bill_increment_seconds
+US,local,0.015,1.00,1.50,0.50,60,60,0.004,0.50,0.80,6,6
+GB,national,0.018,1.50,1.50,0.50,6,6,0.005,0.80,1.00,1,1"></textarea>
+    <p class="error" id="rbm-err" style="display:none;text-align:left;margin-top:.5rem"></p>
+  </div>
+  <div class="modal-foot">
+    <button type="button" class="ghost" onclick="closeModal('rate-bulk-modal')">Cancel</button>
+    <button onclick="submitRateBulk({{.Supplier.ID}})">Import</button>
+  </div>
+</dialog>
+
+<script>
+function showSupTab(ev, name){
+  ev.preventDefault();
+  document.querySelectorAll('#sup-tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === name));
+  document.querySelectorAll('.spane').forEach(p => p.classList.toggle('active', p.dataset.tab === name));
+  history.replaceState(null, '', '#'+name);
+}
+(function(){
+  var h = location.hash.replace('#','');
+  if (h && document.querySelector('#sup-tabs a[data-tab="'+h+'"]')){
+    document.querySelectorAll('#sup-tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === h));
+    document.querySelectorAll('.spane').forEach(p => p.classList.toggle('active', p.dataset.tab === h));
+  }
+})();
+
+function openGroupRename(gid, currentName, sid){
+  document.getElementById('grm-label').textContent = '· ' + currentName;
+  document.getElementById('grm-name').value = currentName;
+  document.getElementById('grm-form').action = '/suppliers/'+sid+'/ip-groups/'+gid;
+  openModal('grp-rename-modal');
+}
+function openBulkAdd(gid, name, sid){
+  document.getElementById('bia-label').textContent = '· ' + name;
+  document.getElementById('bia-form').action = '/suppliers/'+sid+'/ip-groups/'+gid+'/ips/bulk';
+  openModal('bulk-ip-modal');
+}
+function openIPEdit(sid, gid, mid, currentCIDR){
+  document.getElementById('ipe-label').textContent = '· ' + currentCIDR;
+  document.getElementById('ipe-cidr').value = currentCIDR;
+  document.getElementById('ipe-form').action = '/suppliers/'+sid+'/ip-groups/'+gid+'/ips/'+mid+'/edit';
+  openModal('ip-edit-modal');
+}
+
+// recalcRatePreview wires the rate-card live preview tables. Reads every
+// input from the surrounding form (prefix `rm` for the create modal, `re`
+// for the edit modal) and renders two tables:
+//   1. Per-call profit at durations 30, 60, 90, 120, 150, 180, 210s.
+//   2. First-month total at (DIDs × channels) combinations.
+// Math mirrors domain.ChargeForCall (configurable customer increment,
+// ceil-to-cent) and domain.SupplierChargeForCall (configurable supplier
+// increment, ceil-to-cent) exactly so the preview is what gets stored.
+function recalcRatePreview(p){
+  function n(id){ var v = parseFloat(document.getElementById(p+'-'+id).value); return isFinite(v) ? v : 0; }
+  function nint(id, def){ var el = document.getElementById(p+'-'+id); if (!el) return def; var v = parseInt(el.value, 10); return isFinite(v) ? v : def; }
+  function fmt(d){ return (d < 0 ? '-$' : '$') + Math.abs(d).toFixed(4); }
+  function fmt2(d){ return (d < 0 ? '-$' : '$') + Math.abs(d).toFixed(2); }
+  function profitClass(p){ if (p > 0) return 'profit-good'; if (p < 0) return 'profit-bad'; return 'muted'; }
+  // Apply customer/supplier billing increment to raw billsec, returning the
+  // post-round duration that will be priced. min/inc are the connection
+  // minimum and round-up step in seconds — see domain.ChargeForCall.
+  function roundBilled(billsec, min, inc){
+    var b = billsec;
+    if (b < min) return min;
+    var rem = b % inc;
+    if (rem !== 0) b += inc - rem;
+    return b;
+  }
+
+  var pmin    = n('pmin');
+  var nrc     = n('nrc');
+  var mrc     = n('mrc');
+  var ch      = n('ch');
+  var custBillMin = nint('cust-bill-min', 60);
+  var custBillInc = nint('cust-bill-inc', 60);
+  var supPMin = n('sup-pmin');
+  var supNRC  = n('sup-nrc');
+  var supMRC  = n('sup-mrc');
+  var billMin = nint('bill-min', 60);
+  var billInc = nint('bill-inc', 60);
+
+  // ===== Per-call profit (durations sweep) =====
+  // All cell styling (padding / borders / font / alignment) comes from
+  // .rmg-tbl in CSS — inline style here is restricted to the dynamic
+  // profit-color and the muted cost cell.
+  var callBody = '';
+  [30, 60, 90, 120, 150, 180, 210].forEach(function(s){
+    // Customer: configurable min/inc, ceil to cent.
+    var custBilled = roundBilled(s, custBillMin, custBillInc);
+    var custCents  = Math.ceil(custBilled * (pmin / 60) * 100);
+    var custDoll   = custCents / 100;
+    // Supplier: configurable min/inc, ceil to cent.
+    var supBilled  = roundBilled(s, billMin, billInc);
+    var supCents   = Math.ceil(supBilled * (supPMin / 60) * 100);
+    var supDoll    = supCents / 100;
+    var profit     = custDoll - supDoll;
+    var pcolor = profit > 0 ? 'var(--ok)' : (profit < 0 ? 'var(--err)' : 'var(--muted)');
+    callBody +=
+      '<tr>' +
+        '<td class="lead">' + s + 's</td>' +
+        '<td class="num">' + fmt(custDoll) + '</td>' +
+        '<td class="num" style="color:var(--muted)">' + fmt(supDoll) + '</td>' +
+        '<td class="num" style="color:' + pcolor + '">' + fmt(profit) + '</td>' +
+      '</tr>';
+  });
+  document.querySelector('#'+p+'-pv-call tbody').innerHTML = callBody;
+
+  // ===== First-month total: NRC + MRC + channel surcharge =====
+  var dids     = [1, 5, 10];
+  var channels = [2, 4, 8, 16, 32];
+  var monthBody = '';
+  channels.forEach(function(c){
+    var perDIDCustomer = nrc + mrc + Math.max(0, c - 2) * ch;
+    var perDIDSupplier = supNRC + supMRC; // supplier has no channel surcharge in our model
+    var label = c === 2 ? '2*' : c;
+    monthBody += '<tr><td class="lead" style="font-weight:600">' + label + '</td>';
+    dids.forEach(function(d, di){
+      var sell   = d * perDIDCustomer;
+      var cost   = d * perDIDSupplier;
+      var profit = sell - cost;
+      var pcolor = profit > 0 ? 'var(--ok)' : (profit < 0 ? 'var(--err)' : 'var(--muted)');
+      var endCls = di < 2 ? ' grp-end' : '';
+      monthBody +=
+        '<td class="num">' + fmt2(sell) + '</td>' +
+        '<td class="num" style="color:var(--muted)">' + fmt2(cost) + '</td>' +
+        '<td class="num' + endCls + '" style="color:' + pcolor + '">' + fmt2(profit) + '</td>';
+    });
+    monthBody += '</tr>';
+  });
+  document.querySelector('#'+p+'-pv-month tbody').innerHTML = monthBody;
+}
+
+// Pre-fill the edit modal from the row's data tuple. Country and DID type
+// are locked (changing them would either violate the unique-active index
+// or move the rate to a different slot — admin should expire+recreate).
+function openRateEdit(d){
+  document.getElementById('re-label').textContent = '· ' + (d.country_name || d.country) + ' / ' + prettyDIDType(d.did_type);
+  document.getElementById('re-form').action = '/rate-cards/' + d.id + '/update';
+  document.getElementById('re-country-display').value = (d.country_name ? d.country_name + ' (' + d.country + ')' : d.country);
+  document.getElementById('re-type-display').value = prettyDIDType(d.did_type);
+  document.getElementById('re-pmin').value      = d.per_minute;
+  document.getElementById('re-nrc').value       = d.nrc;
+  document.getElementById('re-mrc').value       = d.mrc;
+  document.getElementById('re-ch').value        = d.channel;
+  document.getElementById('re-sup-pmin').value  = d.supplier_per_minute;
+  document.getElementById('re-sup-nrc').value   = d.supplier_nrc;
+  document.getElementById('re-sup-mrc').value   = d.supplier_mrc;
+  // Helper: pick the dropdown option whose value matches `secs`, fall back
+  // to the first option (60/60) if none matches. Then echo the chosen
+  // value into the hidden inputs the form actually POSTs.
+  function pickCycle(selectId, hiddenMinId, hiddenIncId, secs){
+    var sel = document.getElementById(selectId);
+    var matched = false;
+    for (var i=0;i<sel.options.length;i++){
+      if (parseInt(sel.options[i].value, 10) === secs){ sel.selectedIndex = i; matched = true; break; }
+    }
+    if (!matched) sel.selectedIndex = 0;
+    document.getElementById(hiddenMinId).value = secs || 60;
+    document.getElementById(hiddenIncId).value = secs || 60;
+  }
+  pickCycle('re-cust-bill', 're-cust-bill-min', 're-cust-bill-inc', d.bill_min || 60);
+  pickCycle('re-bill',      're-bill-min',      're-bill-inc',      d.sup_bill_min || 60);
+  recalcRatePreview('re');
+  openModal('rate-edit-modal');
+}
+// Open-create-rate hook — fires the live preview once so the table isn't
+// blank when the modal first appears.
+(function(){
+  var origOpen = window.openModal;
+  window.openModal = function(id){
+    origOpen(id);
+    if (id === 'rate-modal' && typeof recalcRatePreview === 'function'){
+      recalcRatePreview('rm');
+    }
+  };
+})();
+
+// Country → already-active DID types lookup, populated server-side.
+var ACTIVE_BY_ISO = {{.ActiveTypesJSON}};
+
+// Render a DID-type enum value as its human label, matching the Go didtype
+// helper exactly (so the dropdown looks the same as the rest of the UI).
+function prettyDIDType(s){
+  if (s === 'tollfree') return 'Toll Free';
+  if (!s) return '';
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+function rmRefreshTypes(){
+  var iso = document.getElementById('rm-country').value;
+  var taken = ACTIVE_BY_ISO[iso] || [];
+  var sel = document.getElementById('rm-type');
+  var hint = document.getElementById('rm-type-hint');
+  for (var i=0;i<sel.options.length;i++){
+    var o = sel.options[i];
+    var dis = taken.indexOf(o.value) >= 0;
+    o.disabled = dis;
+    o.textContent = prettyDIDType(o.value) + (dis ? ' (taken — expire first)' : '');
+  }
+  // Pick the first non-disabled option.
+  for (var i=0;i<sel.options.length;i++){ if (!sel.options[i].disabled){ sel.selectedIndex = i; break; } }
+  if (taken.length){
+    hint.style.display = 'block';
+    hint.querySelector('span').textContent =
+      iso + ' already has rates for: ' + taken.map(prettyDIDType).join(', ') + '. Expire one to free that slot.';
+  } else {
+    hint.style.display = 'none';
+  }
+}
+
+async function submitRateBulk(sid){
+  var err = document.getElementById('rbm-err');
+  err.style.display = 'none';
+  var csv = document.getElementById('rbm-csv').value.trim();
+  if (!csv){ err.textContent = 'paste a CSV first'; err.style.display='block'; return; }
+  var lines = csv.split(/\r?\n/).filter(function(l){ return l.trim(); });
+  if (lines.length < 2){ err.textContent = 'need a header line + at least one row'; err.style.display='block'; return; }
+  var headers = lines[0].split(',').map(function(s){ return s.trim(); });
+  var rows = [];
+  for (var i=1;i<lines.length;i++){
+    var cols = lines[i].split(',').map(function(s){ return s.trim(); });
+    var obj = {};
+    for (var j=0;j<headers.length;j++){
+      var v = cols[j] || '';
+      if (['per_minute','nrc','mrc','channel','supplier_per_minute','supplier_nrc','supplier_mrc'].indexOf(headers[j]) >= 0){
+        obj[headers[j]] = parseFloat(v) || 0;
+      } else if (['bill_min_seconds','bill_increment_seconds','supplier_bill_min_seconds','supplier_bill_increment_seconds'].indexOf(headers[j]) >= 0){
+        obj[headers[j]] = parseInt(v, 10) || 0;
+      } else {
+        obj[headers[j]] = v;
+      }
+    }
+    rows.push(obj);
+  }
+  try {
+    var resp = await fetch('/suppliers/'+sid+'/rate-cards/bulk', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({rows: rows}),
+    });
+    var data = await resp.json();
+    if (!resp.ok){ err.textContent = data.error || ('HTTP '+resp.status); err.style.display='block'; return; }
+    closeModal('rate-bulk-modal');
+    location.reload();
+  } catch (e) {
+    err.textContent = e.message; err.style.display='block';
+  }
+}
+</script>
+{{end}}

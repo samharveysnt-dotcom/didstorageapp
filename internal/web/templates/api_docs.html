@@ -1,0 +1,528 @@
+{{define "content"}}
+<style>
+  .apidoc{display:grid;grid-template-columns:200px 1fr;gap:1.5rem;margin-top:.5rem}
+  .apidoc .toc{position:sticky;top:1.5rem;align-self:start;font-size:12.5px;line-height:1.7}
+  .apidoc .toc h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);margin:1rem 0 .3rem;font-weight:600}
+  .apidoc .toc h3:first-child{margin-top:0}
+  .apidoc .toc a{display:block;color:var(--ink-2);text-decoration:none;padding:.15rem .55rem;border-radius:3px;border-bottom:0}
+  .apidoc .toc a:hover{color:var(--ink-1);background:var(--surface-2);border-bottom:0}
+  .apidoc .body{min-width:0;max-width:78ch}
+  .apidoc .body section{margin-bottom:2.2rem;scroll-margin-top:1rem}
+  .apidoc .body section h2{font-size:.85rem;color:var(--accent-text);font-weight:700;letter-spacing:.06em;margin:0 0 .3rem}
+  .apidoc .body section > p.lead{color:var(--ink-2);margin:0 0 1rem;font-size:13.5px}
+  .endpoint{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:1rem 1.1rem;margin:.8rem 0;scroll-margin-top:1rem}
+  .endpoint .head{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
+  .endpoint .method{display:inline-block;padding:.15rem .5rem;font:600 10.5px/1 var(--font-mono);text-transform:uppercase;border-radius:4px;letter-spacing:.05em}
+  .endpoint .method.get   {background:rgba(35,165,90,.18);color:var(--ok)}
+  .endpoint .method.post  {background:rgba(88,101,242,.2);color:var(--accent-text)}
+  .endpoint .method.patch {background:rgba(240,178,50,.2);color:var(--warn)}
+  .endpoint .method.delete{background:rgba(218,55,60,.2);color:var(--err)}
+  .endpoint .path{font-family:var(--font-mono);font-size:13px;color:var(--ink-1);font-weight:600}
+  .endpoint .desc{color:var(--ink-2);font-size:13px;margin:.55rem 0 0;line-height:1.55}
+  .endpoint h4{margin:1rem 0 .25rem;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);font-weight:600}
+  .endpoint pre{margin:.2rem 0;background:#0d0d0e;border:1px solid var(--line);border-radius:5px;padding:.7rem .85rem;font:12px/1.55 var(--font-mono);color:var(--ink-1);overflow-x:auto;white-space:pre}
+  .endpoint pre.curl{background:var(--surface-2)}
+  .endpoint table.params{width:100%;margin:.3rem 0;font-size:12.5px}
+  .endpoint table.params th,.endpoint table.params td{padding:.3rem .55rem;border-bottom:1px solid var(--line-soft);white-space:normal;height:auto;max-width:none}
+  .endpoint table.params th{background:transparent;color:var(--ink-3);font-size:10.5px;letter-spacing:.06em}
+  .endpoint table.params td:first-child{font-family:var(--font-mono);color:var(--ink-1);font-size:12px;width:30%}
+  .endpoint table.params td:nth-child(2){font-family:var(--font-mono);color:var(--ink-3);font-size:11.5px;width:18%}
+  .scope-note{background:var(--surface-2);border:1px solid var(--line);border-radius:5px;padding:.7rem .9rem;font-size:12.5px;color:var(--ink-2);margin-bottom:1rem}
+  .scope-note strong{color:var(--ink-1)}
+  .never-list{background:rgba(218,55,60,.08);border:1px solid rgba(218,55,60,.25);border-radius:5px;padding:.7rem .9rem;color:var(--ink-1);font-size:12.5px}
+  .never-list strong{color:var(--err)}
+  .never-list ul{margin:.4rem 0 0 .8rem;padding:0;line-height:1.7}
+  .never-list li{font-size:12.5px}
+  @media(max-width:880px){
+    .apidoc{grid-template-columns:1fr}
+    .apidoc .toc{position:static;border-bottom:1px solid var(--line-soft);padding-bottom:.5rem;margin-bottom:.5rem}
+  }
+</style>
+
+<div class="actions-bar">
+  <h1 style="margin:0">Reseller API reference</h1>
+  <a class="btn ghost" href="/settings">{{icon "arrow-right"}}back to settings</a>
+</div>
+
+<p class="muted" style="font-size:13px;margin-top:0;max-width:78ch">
+  The complete JSON REST surface resellers use to manage their own users, orders,
+  DIDs, KYC bundles, ledger, CDRs, and live calls. Every endpoint is bearer-token
+  authenticated and scoped server-side to the calling key's reseller. Generate
+  keys per reseller from <a class="link" href="/resellers">/resellers</a>.
+</p>
+
+<div class="apidoc">
+  <aside class="toc">
+    <h3>Overview</h3>
+    <a href="#overview">Quickstart</a>
+    <a href="#auth">Authentication</a>
+    <a href="#errors">Error shape</a>
+    <a href="#isolation">Data isolation</a>
+    <a href="#supplier-flow">How carriers reach us</a>
+
+    <h3>Endpoints</h3>
+    <a href="#ep-me">Reseller self</a>
+    <a href="#ep-users">Users</a>
+    <a href="#ep-ledger">Ledger</a>
+    <a href="#ep-sip-peers">SIP peers</a>
+    <a href="#ep-orders">Orders</a>
+    <a href="#ep-dids">DIDs</a>
+    <a href="#ep-cdrs">CDRs</a>
+    <a href="#ep-live">Live calls</a>
+    <a href="#ep-kyc">KYC</a>
+    <a href="#ep-causes">Hangup causes</a>
+    <a href="#ep-exports">CSV exports</a>
+  </aside>
+
+  <div class="body">
+
+    <section id="overview">
+      <h2>QUICKSTART</h2>
+      <p class="lead">Every endpoint accepts and returns JSON. The base URL is your public DIDStorage host. Replace <code>YOUR_KEY</code> with the secret from the <a class="link" href="/resellers">/resellers</a> page.</p>
+      <pre class="curl">curl https://didstorage.example/api/v1/me \
+  -H "Authorization: Bearer YOUR_KEY"</pre>
+    </section>
+
+    <section id="auth">
+      <h2>AUTHENTICATION</h2>
+      <p class="lead">Every request must carry a bearer token in the <code>Authorization</code> header. Keys are bcrypt-hashed server-side and looked up on every request; revoking a key in the admin GUI takes effect immediately. Missing or invalid keys return <code>401</code>.</p>
+      <pre>Authorization: Bearer YOUR_KEY</pre>
+    </section>
+
+    <section id="errors">
+      <h2>ERROR SHAPE</h2>
+      <p class="lead">Errors return a JSON object with a single <code>error</code> field plus the appropriate HTTP status.</p>
+      <pre>{
+  "error": "user not in your reseller"
+}</pre>
+      <table class="params">
+        <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>400</td><td>Bad request, validation failed, malformed JSON</td></tr>
+          <tr><td>401</td><td>Missing or invalid bearer token</td></tr>
+          <tr><td>402</td><td>Insufficient balance to charge NRC</td></tr>
+          <tr><td>403</td><td>Resource exists but does not belong to your reseller</td></tr>
+          <tr><td>404</td><td>Resource not found within your reseller scope</td></tr>
+          <tr><td>409</td><td>Conflict (e.g. DID already assigned, order not in editable state)</td></tr>
+          <tr><td>500</td><td>Server error</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="isolation">
+      <h2>DATA ISOLATION</h2>
+      <p class="lead">Every query is scoped to the reseller_id derived from your API key. You can never read, write, or even discover another reseller's data. The platform also guarantees these resources are NEVER exposed via the reseller API:</p>
+      <div class="never-list">
+        <strong>Never exposed to the reseller API:</strong>
+        <ul>
+          <li>Supplier names, supplier IPs, supplier hostnames (sanitised in SIP traces to <code>did:E164</code>)</li>
+          <li>Other resellers' users, orders, ledger, CDRs, KYC bundles</li>
+          <li>Admin email addresses or admin-side compliance actions</li>
+          <li>Reserved-DID metadata (admin-only routing, including audio reservations)</li>
+          <li>Asterisk channel names, internal admin-action stamps on calls</li>
+          <li>Raw supplier-side IP addresses on CDRs (the To-URI's host is rewritten to the DID in trace exports)</li>
+          <li>Other resellers' API keys, brand names, hostnames</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="supplier-flow">
+      <h2>HOW CARRIERS REACH US</h2>
+      <p class="lead">Resellers don't talk to the SIP signalling path directly. The flow is one-way inbound:</p>
+      <pre>supplier (your carrier) ──INVITE──> Asterisk (UDP/TCP 5060)
+                                      │
+                                      ├─ AGI: /opt/didstorage/scripts/dids-authorize.py
+                                      │       ↓
+                                      │   POST /sipctl/authorize  (internal, shared-token auth)
+                                      │       ↓
+                                      │   {decision, route_kind, route_target, max_seconds, ...}
+                                      │
+                                      ├─ Dial(PJSIP/outbound/sip:user@host, max_seconds)
+                                      │
+                                      └─ hangup-handler  ──> POST /sipctl/cdr  (internal)
+                                                              ↓
+                                                          ledger debit + CDR row written</pre>
+      <p class="lead" style="margin-top:1rem">The reseller API surfaces the AFTER-effects of this flow: CDRs, ledger entries, live-call state, supplier-side denial outcomes. It does NOT expose <code>/sipctl/*</code> (which is reserved for Asterisk itself, behind a shared X-DIDS-Auth token), nor any of the underlying supplier identity (IPs, hostnames, supplier names).</p>
+    </section>
+
+    <!-- ====================== ENDPOINTS ====================== -->
+
+    <section id="ep-me">
+      <h2>RESELLER SELF</h2>
+      <div class="endpoint" id="ep-me-get">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/me</span></div>
+        <p class="desc">Return your reseller profile and a couple of high-level counts. Useful as a health check and to confirm which reseller a key belongs to.</p>
+        <h4>Response</h4>
+        <pre>{
+  "id": 3,
+  "name": "AcmeVoice",
+  "brand_name": "Acme",
+  "portal_hostname": "portal.acme.example",
+  "status": "active",
+  "created_at": "2025-11-04T09:12:00Z",
+  "user_count": 142,
+  "active_orders": 318
+}</pre>
+        <h4>curl</h4>
+        <pre class="curl">curl https://didstorage.example/api/v1/me -H "Authorization: Bearer YOUR_KEY"</pre>
+      </div>
+    </section>
+
+    <section id="ep-users">
+      <h2>USERS</h2>
+      <p class="lead">Customer-level entities owned by your reseller. Balance, channel cap, KYC, and SIP peers all hang off a user.</p>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/users</span></div>
+        <p class="desc">List every user under your reseller, newest first. Capped at 500 rows per call.</p>
+        <h4>Response</h4>
+        <pre>{
+  "users": [
+    {
+      "id": 12,
+      "external_id": "ACME-2026-00123",
+      "label": "Acme HQ",
+      "contact_email": "ops@acme.example",
+      "status": "active",
+      "balance_cents": 12450,
+      "global_channel_cap": -1,
+      "created_at": "2026-01-04T12:00:00Z",
+      "active_orders": 4
+    }
+  ]
+}</pre>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method post">POST</span><span class="path">/api/v1/users</span></div>
+        <p class="desc">Create a new user under your reseller. <code>external_id</code> is your reference and is required; it is what you'll use to find the user later via <code>/api/v1/users/by-external/{ext}</code>.</p>
+        <h4>Body</h4>
+        <pre>{
+  "external_id": "ACME-2026-00123",
+  "label": "Acme HQ",
+  "contact_email": "ops@acme.example",
+  "global_channel_cap": -1
+}</pre>
+        <h4>Response</h4>
+        <pre>{ "id": 12, "external_id": "ACME-2026-00123" }</pre>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/users/{id}</span></div>
+        <p class="desc">Fetch one user by id.</p>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/users/by-external/{ext}</span></div>
+        <p class="desc">Fetch one user by your external_id. Useful when you only have your own reference.</p>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method post">POST</span><span class="path">/api/v1/users/{id}/topup</span></div>
+        <p class="desc">Credit the user's balance and append a <code>topup</code> ledger entry. Returns the new balance. Amounts are in integer cents (USD).</p>
+        <h4>Body</h4>
+        <pre>{ "amount_cents": 5000 }</pre>
+        <h4>Response</h4>
+        <pre>{ "balance_cents": 17450 }</pre>
+      </div>
+    </section>
+
+    <section id="ep-ledger">
+      <h2>LEDGER</h2>
+      <p class="lead">Every credit and debit on the user's balance, oldest entry first when sorted. Source of truth for billing reconciliation. The cached <code>balance_cents</code> on the user record is the running sum.</p>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/users/{id}/ledger</span></div>
+        <p class="desc">List the user's ledger entries newest first. The <code>ref_table</code> + <code>ref_id</code> pair identifies what produced the entry; <code>ref_call_id</code> and <code>ref_order_id</code> resolve to the linked records for client display.</p>
+        <h4>Query</h4>
+        <table class="params"><thead><tr><th>name</th><th>type</th><th>desc</th></tr></thead><tbody>
+          <tr><td>limit</td><td>int (1..1000)</td><td>Default 100.</td></tr>
+        </tbody></table>
+        <h4>Response</h4>
+        <pre>{
+  "ledger": [
+    {
+      "id": 9821,
+      "created_at": "2026-05-16T17:42:18Z",
+      "delta_cents": -45,
+      "kind": "call_charge",
+      "balance_after_cents": 17405,
+      "ref_table": "cdrs",
+      "ref_id": 12044,
+      "ref_call_id": "abc-1234-def-5678",
+      "ref_order_id": 92
+    }
+  ]
+}</pre>
+      </div>
+    </section>
+
+    <section id="ep-sip-peers">
+      <h2>SIP PEERS</h2>
+      <p class="lead">Registered SIP accounts under one of your users. The <code>username</code> is what you reference as the <code>route_target</code> on an order with <code>route_kind = "sip_account"</code>. The digest secret (<code>ha1</code>) is NEVER returned; you set it server-side via POST and the platform discards the plaintext immediately. POST and DELETE also rewrite <code>/etc/asterisk/pjsip_users.conf</code> and run <code>pjsip reload</code> so the new peer is registerable immediately.</p>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/users/{id}/sip-accounts</span></div>
+        <p class="desc">List SIP peers for one user.</p>
+        <h4>Response</h4>
+        <pre>{
+  "sip_accounts": [
+    { "id": 3, "user_id": 12, "username": "acme01", "realm": "didstorage.local",
+      "created_at": "2026-04-10T12:00:00Z" }
+  ]
+}</pre>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method post">POST</span><span class="path">/api/v1/users/{id}/sip-accounts</span></div>
+        <p class="desc">Create a SIP peer. Username 1-32 chars [a-zA-Z0-9_-]; reserved Asterisk section names and <code>-auth</code> / <code>-aor</code> suffixes are rejected. Password &ge; 8 chars. Asterisk reload happens in the background.</p>
+        <h4>Body</h4>
+        <pre>{ "username": "acme01", "password": "a-strong-secret" }</pre>
+        <h4>Response</h4>
+        <pre>{ "id": 3, "username": "acme01", "realm": "didstorage.local" }</pre>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method delete">DELETE</span><span class="path">/api/v1/users/{id}/sip-accounts/{said}</span></div>
+        <p class="desc">Remove a SIP peer. Asterisk reload happens in the background. Calls already in progress on the peer continue until natural hangup.</p>
+      </div>
+    </section>
+
+    <section id="ep-orders">
+      <h2>ORDERS</h2>
+      <p class="lead">A per-DID rental owned by one user. Holds the route (where calls land), channel cap, anniversary day for monthly billing, and optional KYC bundle. NRC is charged on create; MRC + per-channel fees on each anniversary.</p>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/orders</span></div>
+        <p class="desc">List every order under your reseller, newest first.</p>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method post">POST</span><span class="path">/api/v1/orders</span></div>
+        <p class="desc">Rent a DID for one of your users. The DID must currently be <code>available</code> in <code>/api/v1/dids</code>. NRC is charged from the user's balance atomically; if balance is insufficient you get <code>402</code> and nothing is written. If you supply a <code>kyc_bundle_id</code> that's already approved the order starts <code>active</code>, otherwise <code>kyc_pending</code>.</p>
+        <h4>Body</h4>
+        <pre>{
+  "user_id": 12,
+  "did_id": 401,
+  "channel_count": 2,
+  "route_kind": "sip_uri",
+  "route_target": "sip:helpdesk@acme.example:5060",
+  "anniversary_day": 5,
+  "kyc_bundle_id": null
+}</pre>
+        <h4>Response</h4>
+        <pre>{
+  "order_id": 92,
+  "status": "active",
+  "nrc_charged_cents": 500
+}</pre>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/orders/{id}</span></div>
+        <p class="desc">Fetch one order by id.</p>
+        <h4>Response</h4>
+        <pre>{
+  "id": 92, "user_id": 12, "did_id": 401, "did_e164": "442038968001",
+  "status": "active", "channel_count": 2,
+  "route_kind": "sip_uri", "route_target": "sip:helpdesk@acme.example:5060",
+  "next_billing_at": "2026-06-05T00:00:00Z",
+  "kyc_bundle_id": 7, "kyc_status": "approved"
+}</pre>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method patch">PATCH</span><span class="path">/api/v1/orders/{id}</span></div>
+        <p class="desc">Update the route, channel count, or attached KYC bundle on an existing order. Only valid while the order is <code>active</code>, <code>kyc_pending</code>, or <code>quarantined</code>. All fields are optional; only provided fields change. Attaching an approved bundle to a <code>kyc_pending</code> order automatically promotes it to <code>active</code>.</p>
+        <h4>Body</h4>
+        <pre>{
+  "route_kind": "sip_uri",
+  "route_target": "sip:newhelpdesk@acme.example",
+  "channel_count": 4,
+  "kyc_bundle_id": 7
+}</pre>
+        <h4>Response</h4>
+        <pre>{ "status": "updated", "route_kind": "sip_uri",
+  "route_target": "sip:newhelpdesk@acme.example", "channel_count": 4 }</pre>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method post">POST</span><span class="path">/api/v1/orders/{id}/cancel</span></div>
+        <p class="desc">Cancel an order. The DID returns to the available pool immediately. Cancellation is irreversible; create a new order to re-assign the DID.</p>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/orders/{id}/cdrs</span></div>
+        <p class="desc">List CDRs scoped to one order, newest first. Equivalent to <code>/api/v1/cdrs?order_id={id}</code> but cleaner for scoped fetches.</p>
+        <h4>Query</h4>
+        <table class="params"><thead><tr><th>name</th><th>type</th><th>desc</th></tr></thead><tbody>
+          <tr><td>limit</td><td>int (1..500)</td><td>Default 100.</td></tr>
+        </tbody></table>
+      </div>
+    </section>
+
+    <section id="ep-dids">
+      <h2>DIDS</h2>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/dids</span></div>
+        <p class="desc">List DIDs visible to you: the ones currently assigned to your users, plus everything globally <code>available</code> for rent. Default cap 1000 rows; max 5000.</p>
+        <h4>Query</h4>
+        <table class="params"><thead><tr><th>name</th><th>type</th><th>desc</th></tr></thead><tbody>
+          <tr><td>country</td><td>ISO-3166 (GB, US, ...)</td><td>Filter by country code (case-insensitive).</td></tr>
+          <tr><td>did_type</td><td>mobile, national, local, tollfree</td><td>Filter by category.</td></tr>
+          <tr><td>available</td><td>true / 1</td><td>Restrict to globally-available DIDs (skip your assigned ones).</td></tr>
+          <tr><td>q</td><td>string</td><td>Substring match on E.164.</td></tr>
+          <tr><td>limit</td><td>int (1..5000)</td><td>Default 1000.</td></tr>
+        </tbody></table>
+        <h4>Response</h4>
+        <pre>{
+  "dids": [
+    { "id": 401, "e164": "442038968001", "country_iso": "GB", "did_type": "national",
+      "status": "assigned", "user_id": 12, "order_id": 92, "channel_count": 2,
+      "route_kind": "sip_uri", "route_target": "sip:helpdesk@acme.example:5060" }
+  ]
+}</pre>
+      </div>
+    </section>
+
+    <section id="ep-cdrs">
+      <h2>CDRS</h2>
+      <p class="lead">Completed-call records, scoped to your reseller's users. Newest first. Supports many filters via query params for searches and reconciliation.</p>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/cdrs</span></div>
+        <h4>Query</h4>
+        <table class="params"><thead><tr><th>name</th><th>type</th><th>desc</th></tr></thead><tbody>
+          <tr><td>limit</td><td>int (1..500)</td><td>Default 100.</td></tr>
+          <tr><td>user_id</td><td>int</td><td>Filter to one user.</td></tr>
+          <tr><td>order_id</td><td>int</td><td>Filter to one order.</td></tr>
+          <tr><td>external_id</td><td>string</td><td>Filter by your external_id.</td></tr>
+          <tr><td>did</td><td>string</td><td>Substring match on E.164.</td></tr>
+          <tr><td>from</td><td>YYYY-MM-DD</td><td>Inclusive start date in UTC.</td></tr>
+          <tr><td>to</td><td>YYYY-MM-DD</td><td>Exclusive end date in UTC (matches CSV exports).</td></tr>
+          <tr><td>state</td><td>answered, failed</td><td>Filter by call state.</td></tr>
+        </tbody></table>
+        <h4>Response</h4>
+        <pre>{
+  "cdrs": [
+    {
+      "id": 12044, "call_id": "abc-1234-def-5678",
+      "did_e164": "442038968001",
+      "user_id": 12, "user_external_id": "ACME-2026-00123", "order_id": 92,
+      "started_at": "2026-05-16T17:42:00Z",
+      "ended_at":   "2026-05-16T17:42:18Z",
+      "billsec": 18, "charged_minutes": 1, "charge_cents": 45,
+      "bill_min_seconds": 60, "bill_increment_seconds": 60,
+      "hangup_cause": "16", "state": "answered"
+    }
+  ]
+}</pre>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/cdrs/{call_id}/sip-trace</span></div>
+        <p class="desc">Return the SIP wire-trace observed on the platform for one of your CDRs. The response is sanitised: every supplier IP is rewritten to <code>did:E164</code>, and the platform's public IP is rewritten to your <code>brand_name</code>. You never see who the upstream carrier was. Accepts either the sanitised prefix or the raw <code>prefix@host:port</code> form.</p>
+      </div>
+    </section>
+
+    <section id="ep-live">
+      <h2>LIVE CALLS</h2>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/live</span></div>
+        <p class="desc">Active inbound calls for your reseller, derived from the platform's Redis live-call index. Polling 1s is fine. Reserved-DID admin traffic and all admin-action metadata are filtered out.</p>
+        <h4>Response</h4>
+        <pre>{
+  "calls": [
+    {
+      "call_id": "abc-1234-def-5678",
+      "did_e164": "442038968001",
+      "user_id": 12, "order_id": 92,
+      "src_uri": "447956816884",
+      "route_kind": "sip_uri",
+      "route_target": "sip:helpdesk@acme.example:5060",
+      "started_at": "2026-05-16T17:42:00Z",
+      "billsec_approx": 7,
+      "rate_cents_per_min": 2.5
+    }
+  ]
+}</pre>
+      </div>
+    </section>
+
+    <section id="ep-kyc">
+      <h2>KYC BUNDLES</h2>
+      <p class="lead">KYC documents are uploaded by you on behalf of a user and approved (or rejected) by the platform admins. A bundle is required before an order leaves <code>kyc_pending</code>.</p>
+
+      <div class="endpoint">
+        <div class="head"><span class="method post">POST</span><span class="path">/api/v1/users/{id}/kyc-bundles</span></div>
+        <p class="desc">Create a new bundle for one of your users. Bundle starts <code>pending</code>; admins approve in the admin GUI.</p>
+        <h4>Body</h4>
+        <pre>{ "type": "person", "info": { "legal_name": "...", "address": "..." } }</pre>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/users/{id}/kyc-bundles</span></div>
+        <p class="desc">List bundles for a user.</p>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/kyc-bundles/{bid}</span></div>
+        <p class="desc">Get a bundle's details and its uploaded documents (filename + size only, never the file bytes).</p>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method post">POST</span><span class="path">/api/v1/kyc-bundles/{bid}/documents</span></div>
+        <p class="desc">Upload a KYC document. Multipart form. Field <code>file</code> is the binary, field <code>kind</code> classifies it (<code>id_front</code>, <code>id_back</code>, <code>passport</code>, <code>address_proof</code>, <code>company_registration</code>, <code>other</code>). Max 25 MB.</p>
+        <h4>curl</h4>
+        <pre class="curl">curl -H "Authorization: Bearer YOUR_KEY" \
+     -F "kind=id_front" -F "file=@id.jpg" \
+     https://didstorage.example/api/v1/kyc-bundles/7/documents</pre>
+      </div>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/kyc-bundles/{bid}/documents/{did}/download</span></div>
+        <p class="desc">Download a stored document.</p>
+      </div>
+    </section>
+
+    <section id="ep-causes">
+      <h2>HANGUP CAUSES</h2>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/cause-codes</span></div>
+        <p class="desc">Read-only mirror of the platform's hangup-cause label table. Lets your dashboard render the same friendly text the admin GUI uses for each CDR cause cell.</p>
+        <h4>Response</h4>
+        <pre>{
+  "cause_codes": [
+    { "code": "16", "label": "Normal Clearing", "detail": "...", "family": "sip" },
+    { "code": "17", "label": "User Busy",       "detail": "...", "family": "sip" },
+    { "code": "insufficient_balance", "label": "Insufficient balance",
+      "detail": "Order rejected because user's balance fell below the minimum.",
+      "family": "platform" }
+  ]
+}</pre>
+      </div>
+    </section>
+
+    <section id="ep-exports">
+      <h2>CSV EXPORTS</h2>
+      <p class="lead">CSV mirrors of the JSON list endpoints for accounting / compliance. All accept optional <code>from</code> + <code>to</code> date-range query params (UTC, YYYY-MM-DD).</p>
+
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/users/{id}/export/cdrs.csv</span></div>
+        <p class="desc">All CDRs for one user.</p>
+      </div>
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/users/{id}/export/ledger.csv</span></div>
+        <p class="desc">All ledger entries for one user.</p>
+      </div>
+      <div class="endpoint">
+        <div class="head"><span class="method get">GET</span><span class="path">/api/v1/orders/{id}/export/cdrs.csv</span></div>
+        <p class="desc">All CDRs for one order.</p>
+      </div>
+    </section>
+  </div>
+</div>
+{{end}}

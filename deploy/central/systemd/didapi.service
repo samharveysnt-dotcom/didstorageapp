@@ -1,0 +1,28 @@
+[Unit]
+Description=DIDStorage API + GUI + SIP control plane
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=didstorage
+Group=didstorage
+EnvironmentFile=/etc/didstorage/didapi.env
+ExecStart=/opt/didstorage/bin/didapi
+Restart=on-failure
+RestartSec=2
+# Allow binding to ports < 1024 (e.g. :80) without root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+# We need to write /etc/asterisk/pjsip_users.conf (for sip_account routing)
+# and talk to /var/run/asterisk/asterisk.ctl (to call `asterisk -rx`).
+ReadWritePaths=/etc/asterisk /var/run/asterisk
+LimitNOFILE=65536
+SupplementaryGroups=asterisk
+
+[Install]
+WantedBy=multi-user.target

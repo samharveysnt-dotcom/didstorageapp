@@ -1,0 +1,26 @@
+{{define "content"}}
+<h1>{{if .IsNew}}New supplier{{else}}Edit supplier{{end}}</h1>
+<div class="section" style="max-width:560px">
+<form method="post" action="/suppliers">
+  <div class="field">
+    <label class="label">Name</label>
+    <input name="name" required value="{{.Supplier.Name}}" placeholder="GlobeTelecom">
+  </div>
+  <div class="field">
+    <label class="label">Status</label>
+    <select name="status">
+      <option value="active" {{if eq .Supplier.Status "active"}}selected{{end}}>active</option>
+      <option value="inactive" {{if eq .Supplier.Status "inactive"}}selected{{end}}>inactive</option>
+    </select>
+  </div>
+  <div class="field">
+    <label class="label">Notes</label>
+    <textarea name="notes" rows="3">{{.Supplier.Notes}}</textarea>
+  </div>
+  <div class="row-actions">
+    <button type="submit">Create supplier</button>
+    <a class="link" href="/suppliers">cancel</a>
+  </div>
+</form>
+</div>
+{{end}}

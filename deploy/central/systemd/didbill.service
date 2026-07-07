@@ -1,0 +1,14 @@
+[Unit]
+Description=DIDStorage anniversary billing run
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+User=didstorage
+Group=didstorage
+EnvironmentFile=/etc/didstorage/didapi.env
+ExecStart=/opt/didstorage/bin/didbill
+
+[Install]
+WantedBy=multi-user.target

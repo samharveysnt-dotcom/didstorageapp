@@ -1,0 +1,608 @@
+{{define "content"}}
+<style>
+  /* ===========================================================================
+   * SIP Trace viewer — Discord-themed, redesigned 2026-05-11.
+   *
+   * Layout: cards row → auto-diagnosis banner → tabs → main content.
+   * Selecting an arrow (or a timeline row) opens the right-hand inspector
+   * panel with parsed headers + raw frame text. Closes on ✕ / Esc.
+   *
+   * Ladder geometry comes pre-computed from trace_diagram.go:
+   *   .Lanes   — endpoint lifelines (x-center, label, kind, packet count)
+   *   .Arrows  — per-message rows with baked-in Y (variable row heights)
+   *   .Phases  — background colour-bands for call phases
+   * ===========================================================================
+   */
+
+  /* ===== Tabs ===== */
+  .trace-tabs{display:flex;flex-wrap:wrap;gap:.2rem;border-bottom:1px solid var(--border);margin-bottom:1.2rem}
+  .trace-tabs a{padding:.55rem 1rem;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;font-size:13px;font-weight:500;cursor:pointer;user-select:none}
+  .trace-tabs a:hover{color:var(--text)}
+  .trace-tabs a.active{color:var(--accent-text);border-bottom-color:var(--accent)}
+  .trace-pane{display:none}
+  .trace-pane.active{display:block}
+
+  /* ===== Auto-diagnosis banner ===== */
+  .diag{display:flex;flex-direction:column;gap:.45rem;margin:0 0 1rem}
+  .diag-card{display:flex;gap:.7rem;padding:.7rem .9rem;border-radius:8px;border:1px solid var(--border);background:var(--card);align-items:flex-start}
+  .diag-card.sev-err{border-color:rgba(218,55,60,.45);background:rgba(218,55,60,.10)}
+  .diag-card.sev-warn{border-color:rgba(240,178,50,.45);background:rgba(240,178,50,.10)}
+  .diag-card.sev-info{border-color:rgba(88,101,242,.4);background:rgba(88,101,242,.08)}
+  .diag-card .diag-ico{flex:0 0 auto;font-weight:700;font-size:18px;line-height:1;width:22px;text-align:center}
+  .diag-card.sev-err .diag-ico{color:var(--err)}
+  .diag-card.sev-warn .diag-ico{color:var(--warn)}
+  .diag-card.sev-info .diag-ico{color:var(--accent-text)}
+  .diag-card .diag-body{flex:1;min-width:0}
+  .diag-card .diag-title{font-weight:600;font-size:13.5px;color:var(--text)}
+  .diag-card .diag-detail{margin-top:.25rem;color:var(--muted);font-size:12.5px;line-height:1.5}
+  .diag-refs{display:inline-flex;flex-wrap:wrap;gap:.3rem;margin-top:.4rem}
+  .diag-refs a{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:22px;padding:0 .45rem;border-radius:6px;background:#1e1f22;border:1px solid var(--border);color:var(--accent-text);font:600 11px ui-monospace,Menlo,monospace;text-decoration:none;cursor:pointer}
+  .diag-refs a:hover{border-color:var(--accent-text)}
+
+  /* ===== Sequence diagram ===== */
+  .ladder-wrap{position:relative;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:auto;padding:0;margin-bottom:.6rem;max-height:78vh}
+  .ladder{display:block;min-width:100%}
+
+  /* Phase ribbons. Sit behind the lifeline + arrows. */
+  .ph-setup    {fill:rgba(88,101,242,.06)}
+  .ph-ringback {fill:rgba(240,178,50,.06)}
+  .ph-talk     {fill:rgba(35,165,90,.07)}
+  .ph-teardown {fill:rgba(148,155,164,.07)}
+  .ph-other    {fill:rgba(148,155,164,.04)}
+  .ph-label    {font:600 9.5px ui-sans-serif,system-ui;fill:var(--muted);text-transform:uppercase;letter-spacing:1px;opacity:.85}
+
+  /* Endpoint cards (lane heads). */
+  .ld-head{stroke-width:1.5;rx:8}
+  .ld-head.ours    {fill:rgba(88,101,242,.12);stroke:var(--accent)}
+  .ld-head.supplier{fill:rgba(240,178,50,.10);stroke:var(--warn)}
+  .ld-head.peer    {fill:rgba(35,165,90,.10);stroke:var(--ok)}
+  .ld-head-name{font:600 12px ui-sans-serif,system-ui;fill:var(--text);text-anchor:middle}
+  .ld-head-kind{font:9.5px ui-sans-serif;fill:var(--muted);text-transform:uppercase;letter-spacing:1px;text-anchor:middle}
+  .ld-head-count{font:600 10px ui-monospace,Menlo,monospace;fill:var(--muted)}
+  .ld-head-count-bg{fill:#1e1f22;stroke:var(--border);stroke-width:.5;rx:4}
+  .ld-head-ico{fill:none;stroke-width:1.6}
+  .ld-head-ico.ours{stroke:var(--accent-text)}
+  .ld-head-ico.supplier{stroke:var(--warn)}
+  .ld-head-ico.peer{stroke:var(--ok)}
+
+  /* Lifelines. */
+  .ld-lane{stroke:var(--border);stroke-width:1;stroke-dasharray:3 5;opacity:.7}
+
+  /* Arrows. */
+  .ld-arrow{stroke-width:2;fill:none;cursor:pointer;transition:stroke-width .12s ease}
+  .ld-arrow.retransmit{stroke-dasharray:5 4;stroke-width:1.8}
+  .ld-arrow.request{stroke:var(--accent-text)}
+  .ld-arrow.response-1xx{stroke:#a0a8b3}
+  .ld-arrow.response-2xx{stroke:var(--ok)}
+  .ld-arrow.response-3xx{stroke:var(--warn)}
+  .ld-arrow.response-4xx,.ld-arrow.response-5xx,.ld-arrow.response-6xx{stroke:var(--err)}
+  .ld-row-hit{fill:transparent;cursor:pointer}
+  .ld-row-hit:hover ~ .ld-arrow,
+  g.ld-row:hover .ld-arrow{stroke-width:3.2}
+  g.ld-row.selected .ld-arrow{stroke-width:3.5;filter:drop-shadow(0 0 4px currentColor)}
+  g.ld-row.selected .ld-row-bg{fill:rgba(154,166,255,.12)}
+  g.ld-row .ld-row-bg{fill:transparent;transition:fill .12s ease}
+  g.ld-row:hover .ld-row-bg{fill:rgba(255,255,255,.03)}
+
+  /* Arrow labels — pill-style backdrop. */
+  .ld-label-bg{fill:#1e1f22;stroke:var(--border);stroke-width:.5;rx:4}
+  .ld-label-text{font:600 11.5px ui-sans-serif,system-ui;fill:var(--text);text-anchor:middle;dominant-baseline:central}
+  .ld-label-text.req{fill:var(--accent-text)}
+  .ld-label-text.s2 {fill:var(--ok)}
+  .ld-label-text.s3 {fill:var(--warn)}
+  .ld-label-text.s4 {fill:var(--err)}
+
+  /* Sequence number bubble + retransmit badge. */
+  .ld-num{font:600 9.5px ui-monospace,Menlo,monospace;fill:var(--muted);text-anchor:middle;dominant-baseline:central}
+  .ld-num-bg{fill:#1e1f22;stroke:var(--border);stroke-width:.5}
+  .ld-retx{font:700 9px ui-sans-serif;fill:var(--warn);text-anchor:middle;dominant-baseline:central}
+  .ld-retx-bg{fill:rgba(240,178,50,.18);stroke:var(--warn);stroke-width:.7;rx:3}
+
+  /* Admin-action markers — horizontal dashed dividers + centered badge.
+   * Colors mirror the /cdrs admin-action pills so the visual mapping is
+   * unambiguous: hangup=red destructive, warn=yellow warning,
+   * redirect=blurple info. Cursor:help so the floating tooltip fires.
+   */
+  .adm-marker .adm-line{stroke-width:1.5;stroke-dasharray:6 5;opacity:.85;fill:none}
+  .adm-marker .adm-badge{stroke-width:1.2}
+  .adm-marker .adm-title{font:700 10.5px ui-sans-serif,system-ui;dominant-baseline:central;letter-spacing:.06em;text-transform:uppercase}
+  .adm-marker .adm-meta {font:10px ui-monospace,Menlo,monospace;dominant-baseline:central;opacity:.85}
+  .adm-marker{cursor:help}
+
+  .adm-marker-hangup .adm-line  {stroke:var(--err)}
+  .adm-marker-hangup .adm-badge {fill:rgba(218,55,60,.18);stroke:var(--err)}
+  .adm-marker-hangup .adm-title {fill:var(--err)}
+  .adm-marker-hangup .adm-meta  {fill:var(--err);opacity:.8}
+
+  .adm-marker-warn .adm-line  {stroke:var(--warn)}
+  .adm-marker-warn .adm-badge {fill:rgba(240,178,50,.18);stroke:var(--warn)}
+  .adm-marker-warn .adm-title {fill:var(--warn)}
+  .adm-marker-warn .adm-meta  {fill:var(--warn);opacity:.85}
+
+  .adm-marker-redirect .adm-line  {stroke:var(--accent)}
+  .adm-marker-redirect .adm-badge {fill:rgba(88,101,242,.18);stroke:var(--accent)}
+  .adm-marker-redirect .adm-title {fill:var(--accent-text)}
+  .adm-marker-redirect .adm-meta  {fill:var(--accent-text);opacity:.85}
+
+  /* Time + delta column on the left. */
+  .ld-time {font:10px ui-monospace,Menlo,monospace;fill:var(--muted);text-anchor:start;dominant-baseline:central}
+  .ld-delta{font:9.5px ui-monospace,Menlo,monospace;fill:var(--muted);text-anchor:start;dominant-baseline:central;opacity:.7}
+  .ld-delta.big{fill:var(--warn);opacity:1;font-weight:600}
+
+  /* Legend strip below the diagram. */
+  .legend{display:flex;flex-wrap:wrap;gap:.8rem 1.4rem;font-size:11.5px;color:var(--muted);margin:.7rem 0 .6rem;align-items:center;padding:.6rem .9rem;background:var(--card);border:1px solid var(--border);border-radius:6px}
+  .legend .swatch{display:inline-block;width:14px;height:3px;border-radius:1px;vertical-align:2px;margin-right:.4em}
+  .legend .swatch.req{background:var(--accent-text)}
+  .legend .swatch.s1{background:#a0a8b3}
+  .legend .swatch.s2{background:var(--ok)}
+  .legend .swatch.s3{background:var(--warn)}
+  .legend .swatch.s4{background:var(--err)}
+  .legend .dot{display:inline-block;width:9px;height:9px;border-radius:2px;vertical-align:-1px;margin-right:.3em}
+  .legend .dot.ours    {background:rgba(88,101,242,.35);border:1.2px solid var(--accent)}
+  .legend .dot.supplier{background:rgba(240,178,50,.35);border:1.2px solid var(--warn)}
+  .legend .dot.peer    {background:rgba(35,165,90,.35);border:1.2px solid var(--ok)}
+  .legend .ph-swatch{display:inline-block;width:14px;height:10px;border-radius:2px;vertical-align:-1px;margin-right:.3em;border:1px solid var(--border)}
+
+  /* ===== Inspector side panel ===== */
+  .inspector{position:fixed;top:0;right:0;width:min(540px,92vw);height:100vh;background:var(--card);border-left:1px solid var(--border);box-shadow:-12px 0 32px rgba(0,0,0,.4);transform:translateX(105%);transition:transform .18s ease;z-index:200;display:flex;flex-direction:column}
+  .inspector.open{transform:translateX(0)}
+  .inspector-head{padding:.9rem 1.1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+  .inspector-head .meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:.2rem}
+  .inspector-head .meta-line{font:600 14px ui-monospace,Menlo,monospace;color:var(--text);word-break:break-all}
+  .inspector-head .meta-sub{font-size:11.5px;color:var(--muted)}
+  .inspector-head .close{background:transparent;border:0;color:var(--muted);font-size:22px;cursor:pointer;padding:0;width:28px;height:28px;border-radius:4px}
+  .inspector-head .close:hover{background:rgba(255,255,255,.05);color:var(--text)}
+  .inspector-body{flex:1;overflow:auto;padding:.8rem 1.1rem 1.4rem}
+  .insp-section{margin-bottom:1.1rem}
+  .insp-section h4{margin:0 0 .35rem;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .insp-kv{display:grid;grid-template-columns:auto 1fr;gap:.2rem .7rem;font-size:12px}
+  .insp-kv .k{color:var(--muted);font:600 11px ui-monospace,Menlo,monospace}
+  .insp-kv .v{color:var(--text);word-break:break-all;font:12px ui-monospace,Menlo,monospace}
+  .insp-raw{margin:0;background:#1e1f22;padding:.8rem;border-radius:6px;border:1px solid var(--border);font:11px/1.5 ui-monospace,Menlo,monospace;overflow:auto;white-space:pre;color:var(--text);max-height:380px}
+  .insp-direction{display:inline-block;padding:.1rem .45rem;border-radius:10px;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.7px}
+  .insp-direction.in {background:rgba(240,178,50,.18);color:var(--warn)}
+  .insp-direction.out{background:rgba(35,165,90,.18);color:var(--ok)}
+
+  /* ===== Raw dump ===== */
+  .raw-dump{margin:0;background:#1e1f22;padding:1rem;border-radius:8px;border:1px solid var(--border);font:11.5px/1.45 ui-monospace,Menlo,monospace;overflow:auto;max-height:70vh;white-space:pre;color:var(--text)}
+
+  /* ===== Timeline tab rows are clickable (sync with inspector). ===== */
+  .timeline-row{cursor:pointer}
+  .timeline-row.selected td{background:rgba(154,166,255,.12)}
+</style>
+
+<div class="actions-bar">
+  <h1 style="margin:0">SIP trace · <code>{{.CDRInfo.DID}}</code> <span class="muted" style="font-size:14px">{{.CDRInfo.Started}}</span></h1>
+  <a class="link" href="/cdrs">{{icon "arrow-left"}}back to CDRs</a>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="label">Result</div>
+    <div class="value" style="font-size:1rem">{{.EndResult}}</div>
+    <div class="sub">{{.CDRInfo.Billsec}}s billable · ${{printf "%.2f" .ChargeDollars}}</div>
+  </div>
+  <div class="card">
+    <div class="label">Call-ID</div>
+    <div class="value" style="font-size:.85rem;word-break:break-all"><code>{{.CallID}}</code></div>
+    <div class="sub">{{len .Trace.Messages}} packet(s) · {{len .Trace.Endpoints}} endpoint(s)</div>
+  </div>
+  <div class="card">
+    <div class="label">Final SIP response</div>
+    <div class="value" style="font-size:1rem">{{if .Trace.FinalSIPCode}}{{.Trace.FinalSIPCode}} {{.Trace.FinalSIPReason}}{{else}}<span class="muted">—</span>{{end}}</div>
+    <div class="sub">{{range $k, $v := .Trace.MethodCounts}}{{$k}}:{{$v}} {{end}}</div>
+  </div>
+  <div class="card">
+    <div class="label">Order</div>
+    <div class="value" style="font-size:1rem">{{if .CDRInfo.Ref}}<code>{{.CDRInfo.Ref}}</code>{{else}}<span class="muted">—</span>{{end}}</div>
+    <div class="sub">customer reference</div>
+  </div>
+</div>
+
+{{/* ===== Auto-diagnosis banner ===== */}}
+{{if .Findings}}
+<div class="diag">
+  {{range .Findings}}
+  <div class="diag-card sev-{{.Severity}}">
+    <div class="diag-ico">{{if eq .Severity "err"}}!{{else if eq .Severity "warn"}}△{{else}}i{{end}}</div>
+    <div class="diag-body">
+      <div class="diag-title">{{.Title}}</div>
+      {{if .Detail}}<div class="diag-detail">{{.Detail}}</div>{{end}}
+      {{if .RefMessages}}
+      <div class="diag-refs">
+        <span class="muted" style="font-size:11px;align-self:center;margin-right:.2rem">packets:</span>
+        {{range .RefMessages}}<a href="#" data-msg-idx="{{.}}" onclick="selectMessage({{.}},'diag');return false;">#{{.}}</a>{{end}}
+      </div>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+<div class="trace-tabs" id="trace-tabs">
+  <a data-tab="overview" class="active" onclick="showTraceTab(event,'overview')">Overview</a>
+  <a data-tab="timeline" onclick="showTraceTab(event,'timeline')">Message Timeline ({{len .Trace.Messages}})</a>
+  <a data-tab="raw"      onclick="showTraceTab(event,'raw')">Raw Dump</a>
+</div>
+
+<!-- ============================================================ Overview -->
+<div class="trace-pane active" data-tab="overview">
+{{if .Diagram.HasData}}
+  <div class="legend">
+    <span><span class="dot supplier"></span>supplier</span>
+    <span><span class="dot ours"></span>platform</span>
+    <span><span class="dot peer"></span>peer / softphone</span>
+    <span style="opacity:.4">·</span>
+    <span><span class="swatch req"></span>request</span>
+    <span><span class="swatch s1"></span>1xx</span>
+    <span><span class="swatch s2"></span>2xx</span>
+    <span><span class="swatch s3"></span>3xx</span>
+    <span><span class="swatch s4"></span>4xx&nbsp;/&nbsp;5xx&nbsp;/&nbsp;6xx</span>
+    <span style="opacity:.4">·</span>
+    <span><span class="ph-swatch" style="background:rgba(88,101,242,.18)"></span>setup</span>
+    <span><span class="ph-swatch" style="background:rgba(240,178,50,.18)"></span>ringback</span>
+    <span><span class="ph-swatch" style="background:rgba(35,165,90,.20)"></span>talk</span>
+    <span><span class="ph-swatch" style="background:rgba(148,155,164,.18)"></span>teardown</span>
+    {{if .Diagram.AdminMarkers}}
+    <span style="opacity:.4">·</span>
+    <span><span class="ph-swatch" style="background:rgba(218,55,60,.25);border-color:var(--err)"></span>admin hangup</span>
+    <span><span class="ph-swatch" style="background:rgba(240,178,50,.25);border-color:var(--warn)"></span>admin warn</span>
+    <span><span class="ph-swatch" style="background:rgba(88,101,242,.25);border-color:var(--accent)"></span>admin redirect</span>
+    {{end}}
+  </div>
+
+  {{$d := .Diagram}}
+  <div class="ladder-wrap">
+    <svg class="ladder" width="{{$d.Width}}" height="{{$d.Height}}" viewBox="0 0 {{$d.Width}} {{$d.Height}}" preserveAspectRatio="xMidYMin meet">
+      <defs>
+        <marker id="ah-req" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="9" markerHeight="9" orient="auto">
+          <path d="M0,0 L8,4 L0,8 z" fill="var(--accent-text)"/>
+        </marker>
+        <marker id="ah-1xx" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="9" markerHeight="9" orient="auto">
+          <path d="M0,0 L8,4 L0,8 z" fill="#a0a8b3"/>
+        </marker>
+        <marker id="ah-2xx" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="9" markerHeight="9" orient="auto">
+          <path d="M0,0 L8,4 L0,8 z" fill="var(--ok)"/>
+        </marker>
+        <marker id="ah-3xx" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="9" markerHeight="9" orient="auto">
+          <path d="M0,0 L8,4 L0,8 z" fill="var(--warn)"/>
+        </marker>
+        <marker id="ah-err" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="9" markerHeight="9" orient="auto">
+          <path d="M0,0 L8,4 L0,8 z" fill="var(--err)"/>
+        </marker>
+      </defs>
+
+      {{/* Phase ribbons painted first so everything sits on top of them. */}}
+      {{range $d.Phases}}
+        <rect class="ph-{{.Kind}}" x="0" y="{{.Y}}" width="{{$d.Width}}" height="{{.H}}"/>
+        {{if .Label}}<text class="ph-label" x="{{sub $d.Width 16}}" y="{{add .Y 14}}" text-anchor="end">{{.Label}}</text>{{end}}
+      {{end}}
+
+      {{/* Lifelines + endpoint cards. */}}
+      {{range $d.Lanes}}
+        <line class="ld-lane" x1="{{.X}}" y1="100" x2="{{.X}}" y2="{{sub $d.Height 14}}"/>
+        <rect class="ld-head {{.Kind}}" x="{{sub .X 100}}" y="14" width="200" height="80"/>
+        {{/* Per-role tiny icon — drawn at the top of the card. */}}
+        {{if eq .Kind "supplier"}}
+          {{/* "broadcast tower" — three stacked arcs */}}
+          <path class="ld-head-ico supplier" d="M{{sub .X 8}} 32 q8 -10 16 0 M{{sub .X 12}} 28 q12 -16 24 0 M{{sub .X 16}} 24 q16 -22 32 0 M{{.X}} 26 v18" stroke-linecap="round"/>
+        {{else if eq .Kind "ours"}}
+          {{/* "server stack" — two rounded rects */}}
+          <rect class="ld-head-ico ours" x="{{sub .X 11}}" y="22" width="22" height="9" rx="2"/>
+          <rect class="ld-head-ico ours" x="{{sub .X 11}}" y="34" width="22" height="9" rx="2"/>
+          <circle cx="{{sub .X 7}}" cy="26.5" r="1" fill="var(--accent-text)" stroke="none"/>
+          <circle cx="{{sub .X 7}}" cy="38.5" r="1" fill="var(--accent-text)" stroke="none"/>
+        {{else}}
+          {{/* "phone handset" — outlined */}}
+          <path class="ld-head-ico peer" d="M{{sub .X 10}} 24 a4 4 0 0 1 4 -4 h2 l3 6 -3 3 a14 14 0 0 0 8 8 l3 -3 6 3 v2 a4 4 0 0 1 -4 4 a22 22 0 0 1 -19 -19 z" stroke-linejoin="round"/>
+        {{end}}
+        <text class="ld-head-name" x="{{.X}}" y="62">{{.Label}}</text>
+        <text class="ld-head-kind" x="{{.X}}" y="80">{{.Kind}}</text>
+        {{/* Packet count badge top-right corner. */}}
+        <rect class="ld-head-count-bg" x="{{add .X 60}}" y="20" width="36" height="16"/>
+        <text class="ld-head-count" x="{{add .X 78}}" y="31" text-anchor="middle">{{.PacketCount}}×</text>
+      {{end}}
+
+      {{/* Arrows, time labels, delta gap indicators, click hit-zones. */}}
+      {{range $i, $a := $d.Arrows}}
+        {{$marker := "ah-err"}}
+        {{$labelClass := "s4"}}
+        {{if eq $a.Class "request"}}{{$marker = "ah-req"}}{{$labelClass = "req"}}{{end}}
+        {{if eq $a.Class "response-1xx"}}{{$marker = "ah-1xx"}}{{$labelClass = ""}}{{end}}
+        {{if eq $a.Class "response-2xx"}}{{$marker = "ah-2xx"}}{{$labelClass = "s2"}}{{end}}
+        {{if eq $a.Class "response-3xx"}}{{$marker = "ah-3xx"}}{{$labelClass = "s3"}}{{end}}
+
+        {{$mid := midpoint $a.X1 $a.X2}}
+        {{$labelW := labelWidth $a.Label}}
+        {{$labelHalf := div $labelW 2}}
+
+        <g class="ld-row" data-msg-idx="{{$a.Index}}" data-arrow-index="{{$i}}"
+           onclick="selectMessage({{$a.Index}},'ladder')">
+          {{/* invisible full-width hit zone for easy clicking */}}
+          <rect class="ld-row-bg" x="0" y="{{sub $a.Y 18}}" width="{{$d.Width}}" height="36"/>
+
+          {{/* Time stamp + delta on the left margin. */}}
+          <text class="ld-time" x="8" y="{{sub $a.Y 4}}">{{$a.Time}}</text>
+          {{if $a.DeltaLabel}}
+            <text class="ld-delta {{if gt $a.DeltaMs 500}}big{{end}}" x="8" y="{{add $a.Y 9}}">{{$a.DeltaLabel}}</text>
+          {{end}}
+
+          {{/* Sequence number bubble at the from-lane. */}}
+          <circle class="ld-num-bg" cx="{{$a.X1}}" cy="{{$a.Y}}" r="10"/>
+          <text class="ld-num" x="{{$a.X1}}" y="{{$a.Y}}">{{$a.Index}}</text>
+
+          {{/* Arrow line — dashed if retransmit. */}}
+          <line class="ld-arrow {{$a.Class}}{{if $a.IsRetransmit}} retransmit{{end}}"
+                x1="{{if lt $a.X1 $a.X2}}{{add $a.X1 12}}{{else}}{{sub $a.X1 12}}{{end}}"
+                y1="{{$a.Y}}"
+                x2="{{$a.X2}}"
+                y2="{{$a.Y}}"
+                marker-end="url(#{{$marker}})"/>
+
+          {{/* Centered label with backdrop pill. */}}
+          <rect class="ld-label-bg"
+                x="{{sub $mid (add $labelHalf 8)}}"
+                y="{{sub $a.Y 12}}"
+                width="{{add $labelW 16}}"
+                height="24"/>
+          <text class="ld-label-text {{$labelClass}}" x="{{$mid}}" y="{{$a.Y}}">{{$a.Label}}</text>
+
+          {{/* Retransmit badge — small "↻N" near the label. */}}
+          {{if $a.IsRetransmit}}
+            <rect class="ld-retx-bg" x="{{sub (add $mid $labelHalf) -10}}" y="{{sub $a.Y 9}}" width="22" height="18"/>
+            <text class="ld-retx" x="{{add (add $mid $labelHalf) 21}}" y="{{$a.Y}}">↻{{$a.RetransmitN}}</text>
+          {{end}}
+        </g>
+      {{end}}
+
+      {{/* ============================================================
+           Admin-action markers — horizontal dashed dividers stamped at
+           the moment an admin used /live to hangup/warn/redirect this
+           call. Drawn last so they sit ON TOP of arrows. Each marker:
+             1. full-width dashed line in the action's accent colour
+             2. centered pill-style badge with title + email + time
+             3. tooltip via the floating #tooltip portal
+           ============================================================ */}}
+      {{range $d.AdminMarkers}}
+        <g class="adm-marker adm-marker-{{.Class}} tip"
+           data-tip="{{.Title}} · admin {{if .AdminEmail}}{{.AdminEmail}}{{else}}unknown{{end}} · {{.Time}}{{if .Reason}} · reason: {{.Reason}}{{end}}{{if gt .AfterArrow 0}} · after packet #{{.AfterArrow}}{{else}} · before packet #1{{end}}">
+          <line class="adm-line" x1="0" y1="{{.Y}}" x2="{{$d.Width}}" y2="{{.Y}}"/>
+          <rect class="adm-badge" x="{{.BadgeX}}" y="{{sub .Y 13}}" width="{{.BadgeW}}" height="26" rx="6"/>
+          <text class="adm-title" x="{{add .BadgeX 12}}" y="{{.Y}}">{{.Title}}</text>
+          <text class="adm-meta"  x="{{sub (add .BadgeX .BadgeW) 12}}" y="{{.Y}}" text-anchor="end">
+            {{if .AdminEmail}}{{.AdminEmail}} · {{end}}{{.Time}}
+          </text>
+        </g>
+      {{end}}
+    </svg>
+  </div>
+
+  <p class="muted" style="font-size:12.5px;margin-top:.3rem">
+    Endpoints (in first-seen order):
+    {{range $i, $e := .Trace.Endpoints}}{{if $i}} · {{end}}<code>{{$e}}</code>{{end}}
+  </p>
+  <p class="muted" style="font-size:11.5px;margin-top:.5rem">
+    {{icon "info"}}Click any arrow or timeline row to inspect that packet's headers and raw payload.
+  </p>
+{{else}}
+  <p class="muted">No SIP packets captured for this call. Either the 7-day pcap retention rolled over, or the capture daemon wasn't running when the call landed.</p>
+{{end}}
+</div>
+
+<!-- ============================================================ Timeline -->
+<div class="trace-pane" data-tab="timeline">
+  {{if .Trace.Messages}}
+  <table>
+    <thead><tr><th>#</th><th>Time</th><th>Dir</th><th>From</th><th>To</th><th>Summary</th></tr></thead>
+    <tbody>
+    {{range $i, $m := .Trace.Messages}}
+      <tr class="timeline-row" data-msg-idx="{{add $i 1}}" onclick="selectMessage({{add $i 1}},'timeline')">
+        <td class="muted">{{add $i 1}}</td>
+        <td class="muted"><code>{{$m.Time}}</code></td>
+        <td>{{if eq $m.Direction "in"}}<span class="pill pill-warn">in</span>{{else}}<span class="pill pill-active">out</span>{{end}}</td>
+        <td><code>{{$m.SrcAddr}}</code></td>
+        <td><code>{{$m.DstAddr}}</code></td>
+        <td>{{$m.Summary}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">No messages captured for this call.</p>
+  {{end}}
+</div>
+
+<!-- ============================================================ Raw -->
+<div class="trace-pane" data-tab="raw">
+  {{if .Trace.Raw}}
+  <pre class="raw-dump">{{.Trace.Raw}}</pre>
+  {{else}}
+  <p class="muted">No raw dump available. tshark verbose output is empty either because no packets matched or because the pcap file was truncated.</p>
+  {{end}}
+</div>
+
+<!-- ============================================================ Inspector side panel -->
+<aside class="inspector" id="inspector" aria-hidden="true">
+  <div class="inspector-head">
+    <div class="meta">
+      <div class="meta-line" id="insp-summary">—</div>
+      <div class="meta-sub" id="insp-sub">—</div>
+    </div>
+    <button type="button" class="close" aria-label="close" onclick="closeInspector()">×</button>
+  </div>
+  <div class="inspector-body">
+    <div class="insp-section">
+      <h4>Endpoints</h4>
+      <div class="insp-kv">
+        <div class="k">src</div><div class="v" id="insp-src">—</div>
+        <div class="k">dst</div><div class="v" id="insp-dst">—</div>
+        <div class="k">dir</div><div class="v" id="insp-dir">—</div>
+        <div class="k">time</div><div class="v" id="insp-time">—</div>
+      </div>
+    </div>
+    <div class="insp-section" id="insp-headers-sec">
+      <h4>Parsed headers</h4>
+      <div class="insp-kv" id="insp-headers">—</div>
+    </div>
+    <div class="insp-section" id="insp-sdp-sec" style="display:none">
+      <h4>SDP (media offer/answer)</h4>
+      <pre class="insp-raw" id="insp-sdp"></pre>
+    </div>
+    <div class="insp-section">
+      <h4>Raw frame</h4>
+      <pre class="insp-raw" id="insp-raw">—</pre>
+    </div>
+  </div>
+</aside>
+
+<p class="muted" style="font-size:12px;margin-top:1rem">
+  API equivalent: <code>GET /api/v1/cdrs/{{.CallID}}/sip-trace</code>
+  — same endpoints, message timeline, final SIP code/reason, and method counts as JSON
+  (reseller-scoped &amp; sanitized).
+</p>
+
+<script>
+// ----- tab switcher (unchanged) -----
+function showTraceTab(ev, name){
+  if (ev) ev.preventDefault();
+  document.querySelectorAll('#trace-tabs a').forEach(function(a){
+    a.classList.toggle('active', a.dataset.tab === name);
+  });
+  document.querySelectorAll('.trace-pane').forEach(function(p){
+    p.classList.toggle('active', p.dataset.tab === name);
+  });
+  history.replaceState(null, '', '#'+name);
+}
+(function(){
+  var h = (location.hash || '').replace('#','');
+  if (h && document.querySelector('#trace-tabs a[data-tab="'+h+'"]')){
+    showTraceTab(null, h);
+  }
+})();
+
+// ----- server-embedded data for the inspector -----
+// MESSAGES is the same JSON shape resellers see via /api/v1/cdrs/.../sip-trace.
+// FRAMES is the tshark -V dump split into per-frame chunks (or a single-item
+// fallback if the split heuristic didn't line up).
+var MESSAGES = {{.MessagesJSON}};
+var FRAMES   = {{.FramesJSON}};
+
+// selectMessage(idx, source) — open the inspector with the 1-based message
+// index idx, scrolling the ladder to it and highlighting both ladder + timeline
+// rows. `source` ∈ "ladder" | "timeline" | "diag" — only used to decide
+// whether to also scroll the timeline tab into view.
+function selectMessage(idx, source){
+  var m = MESSAGES[idx-1];
+  if (!m) return;
+
+  // Deselect previous
+  document.querySelectorAll('g.ld-row.selected, tr.timeline-row.selected')
+    .forEach(function(el){ el.classList.remove('selected'); });
+
+  // Highlight current
+  var ladderG = document.querySelector('g.ld-row[data-msg-idx="'+idx+'"]');
+  var tlRow   = document.querySelector('tr.timeline-row[data-msg-idx="'+idx+'"]');
+  if (ladderG) ladderG.classList.add('selected');
+  if (tlRow)   tlRow.classList.add('selected');
+
+  // Scroll the source-counterpart into view so user keeps context. If clicked
+  // from the diagnosis banner, scroll the ladder.
+  if (source !== 'ladder' && ladderG){
+    ladderG.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+  if (source === 'diag' && document.querySelector('.trace-pane[data-tab="overview"].active') === null){
+    showTraceTab(null, 'overview');
+    setTimeout(function(){ ladderG && ladderG.scrollIntoView({behavior:'smooth', block:'center'}); }, 50);
+  }
+
+  // Fill the inspector
+  document.getElementById('insp-summary').textContent = m.summary || '(no summary)';
+  document.getElementById('insp-sub').innerHTML = 'packet #'+idx+' · <span class="insp-direction '+m.direction+'">'+m.direction+'</span>';
+  document.getElementById('insp-src').textContent = m.src_addr;
+  document.getElementById('insp-dst').textContent = m.dst_addr;
+  document.getElementById('insp-dir').innerHTML = '<span class="insp-direction '+m.direction+'">'+m.direction+'</span>';
+  document.getElementById('insp-time').textContent = m.time;
+
+  // Parse common headers + SDP out of the raw frame chunk.
+  var raw = (FRAMES && FRAMES.length === MESSAGES.length) ? FRAMES[idx-1]
+          : (FRAMES && FRAMES.length > 0)                 ? FRAMES[Math.min(idx-1, FRAMES.length-1)]
+          : '';
+  var headers = parseSIPHeaders(raw);
+  renderHeaders(headers);
+  renderSDP(raw);
+  document.getElementById('insp-raw').textContent = raw || '(no raw frame text available for this packet)';
+
+  document.getElementById('inspector').classList.add('open');
+  document.getElementById('inspector').setAttribute('aria-hidden','false');
+}
+
+function closeInspector(){
+  document.getElementById('inspector').classList.remove('open');
+  document.getElementById('inspector').setAttribute('aria-hidden','true');
+}
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape') closeInspector();
+});
+
+// parseSIPHeaders pulls a curated set of headers out of tshark -V text. We
+// only show high-signal headers in the table — the full raw is right below.
+// Lines look like e.g. "    Via: SIP/2.0/UDP 1.2.3.4:5060;branch=...".
+function parseSIPHeaders(raw){
+  if (!raw) return {};
+  var keep = ['from','to','cseq','via','contact','call-id','user-agent','server','allow','reason','warning','content-type','content-length','max-forwards','expires'];
+  var out = {};
+  raw.split('\n').forEach(function(line){
+    // tshark indents headers with 8 spaces inside "Message Header"; we just
+    // match anything that looks like "Header: value".
+    var m = /^\s*([A-Z][A-Za-z0-9\-]+):\s*(.+?)\s*$/.exec(line);
+    if (!m) return;
+    var k = m[1].toLowerCase();
+    if (keep.indexOf(k) === -1) return;
+    // Some headers (Via) appear multiple times — concatenate.
+    if (out[k]){ out[k] += ' · ' + m[2]; } else { out[k] = m[2]; }
+  });
+  return out;
+}
+
+function renderHeaders(h){
+  var keys = ['from','to','call-id','cseq','via','contact','content-type','user-agent','server','reason','allow','max-forwards','expires'];
+  var html = '';
+  keys.forEach(function(k){
+    if (!h[k]) return;
+    html += '<div class="k">'+k+'</div><div class="v">'+escapeHTML(h[k])+'</div>';
+  });
+  var el = document.getElementById('insp-headers');
+  el.innerHTML = html || '<div class="k" style="grid-column:1/-1;color:var(--muted);font-family:inherit">(no parseable headers — see raw frame below)</div>';
+}
+
+// renderSDP extracts the SDP body if the message includes one. tshark prints
+// SDP under "Session Description Protocol" — we just lift the "v=0..." block.
+function renderSDP(raw){
+  var sec  = document.getElementById('insp-sdp-sec');
+  var body = document.getElementById('insp-sdp');
+  if (!raw){ sec.style.display='none'; return; }
+  // Look for either the verbose-mode container or a literal SDP block.
+  var m = /Session Description Protocol([\s\S]+?)(?:\n\n|\nFrame |$)/.exec(raw);
+  if (m){
+    body.textContent = m[1].replace(/^\s+/, '').replace(/\s+$/, '');
+    sec.style.display = '';
+    return;
+  }
+  // Fallback: look for a bare "v=0\n..." block.
+  var v = /(^|\n)(v=0\r?\n[\s\S]+?)(\n\n|$)/.exec(raw);
+  if (v){
+    body.textContent = v[2].trim();
+    sec.style.display = '';
+    return;
+  }
+  sec.style.display = 'none';
+}
+
+function escapeHTML(s){
+  return String(s).replace(/[&<>"']/g, function(c){
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+  });
+}
+</script>
+{{end}}

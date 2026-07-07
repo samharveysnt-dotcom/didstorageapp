@@ -1,0 +1,11 @@
+[Unit]
+Description=Run DIDStorage billing every hour
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+Persistent=true
+Unit=didbill.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,340 @@
+{{define "content"}}
+<style>
+  /* Import tabs — clean header underline, no chrome around inactive */
+  .imp-tabs{display:flex;gap:.2rem;border-bottom:1px solid var(--border);margin-bottom:1rem}
+  .imp-tabs button{padding:.55rem 1rem;color:var(--muted);background:transparent;border:0;border-bottom:2px solid transparent;font-size:13px;font-weight:500;cursor:pointer;border-radius:0}
+  .imp-tabs button:hover{color:var(--text)}
+  .imp-tabs button.active{color:var(--accent-text);border-bottom-color:var(--accent)}
+  .imp-pane{display:none}
+  .imp-pane.active{display:block}
+
+  /* Progress + log panel */
+  .imp-progress{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:1rem 1.1rem;margin-top:1rem}
+  .imp-progress .bar{height:8px;background:#1e1f22;border-radius:4px;overflow:hidden;margin:.6rem 0 .8rem}
+  .imp-progress .bar > div{height:100%;background:linear-gradient(90deg,var(--accent) 0%,var(--accent-text) 100%);transition:width .15s ease-out}
+  .imp-counters{display:grid;grid-template-columns:repeat(5,1fr);gap:.6rem;font-size:12px;margin-bottom:.6rem}
+  .imp-counters > div{background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:.5rem .65rem}
+  .imp-counters .label{color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}
+  .imp-counters .value{font-size:1.2rem;font-weight:600;margin-top:.15rem;font-variant-numeric:tabular-nums}
+  .imp-counters .v-added .value{color:var(--ok)}
+  .imp-counters .v-skipped .value{color:var(--warn)}
+  .imp-counters .v-errors .value{color:var(--err)}
+
+  /* Log: monospace, scrollable, virtual-ish (we clip to last 300 rows) */
+  .imp-log{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#0d1117;border:1px solid var(--border);border-radius:6px;max-height:340px;overflow:auto;font-size:11.5px;line-height:1.6;padding:.5rem .7rem}
+  .imp-log .row{display:flex;gap:.6rem;align-items:baseline;border-bottom:1px solid rgba(255,255,255,.03);padding:.05rem 0}
+  .imp-log .row:last-child{border-bottom:0}
+  .imp-log .badge{min-width:54px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:0 .35rem;border-radius:3px;text-align:center}
+  .imp-log .badge.added  {background:rgba(35,165,90,.18);color:var(--ok)}
+  .imp-log .badge.skipped{background:rgba(240,178,50,.18);color:var(--warn)}
+  .imp-log .badge.error  {background:rgba(218,55,60,.18);color:var(--err)}
+  .imp-log .e164{color:var(--text)}
+  .imp-log .meta{color:var(--muted)}
+  .imp-log .reason{color:var(--err);font-style:italic}
+
+  .imp-final{display:flex;align-items:center;justify-content:space-between;gap:.7rem;margin-top:.8rem;padding:.55rem .75rem;border-radius:6px;background:rgba(35,165,90,.08);border:1px solid rgba(35,165,90,.25);color:var(--ok);font-size:13px}
+  .imp-final.errored{background:rgba(218,55,60,.08);border-color:rgba(218,55,60,.25);color:var(--err)}
+</style>
+
+<h1>Import DIDs</h1>
+
+{{/* The form is hidden once an import starts, replaced by the progress
+     panel. On done, the user can click "Import more" to reset. */}}
+<div class="section" id="imp-form-wrap" style="max-width:760px">
+
+  <div class="fieldgrid" style="margin-bottom:.6rem">
+    <div class="field"><label class="label">Supplier</label>
+      <select id="imp-supplier" required>
+        <option value="">— pick —</option>
+        {{range .Suppliers}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+    </div>
+    <div class="field"><label class="label">Default country (blank = auto-detect from prefix)</label>
+      <select id="imp-country">
+        <option value="">— auto-detect —</option>
+        {{range .Countries}}<option value="{{.ISO}}">{{.ISO}} · {{.Name}}</option>{{end}}
+      </select>
+    </div>
+    <div class="field"><label class="label">Default DID type</label>
+      <select id="imp-didtype" required>
+        <option value="mobile">Mobile</option>
+        <option value="national">National</option>
+        <option value="local">Local</option>
+        <option value="tollfree">Toll Free</option>
+      </select>
+    </div>
+    <div class="field"><label class="label">Default channel cap (blank = unlimited)</label>
+      <input id="imp-channelcap" type="number" min="1" placeholder="—">
+    </div>
+  </div>
+
+  <div class="imp-tabs">
+    <button type="button" data-tab="range" class="active" onclick="impSwitch('range')">Range</button>
+    <button type="button" data-tab="bulk" onclick="impSwitch('bulk')">Bulk paste</button>
+    <button type="button" data-tab="csv" onclick="impSwitch('csv')">CSV upload</button>
+  </div>
+
+  <div class="imp-pane active" id="imp-pane-range">
+    <div class="fieldgrid">
+      <div class="field"><label class="label">Start E.164 (digits only)</label>
+        <input id="imp-range-start" placeholder="442038968001">
+      </div>
+      <div class="field"><label class="label">End E.164 (blank = single DID)</label>
+        <input id="imp-range-end" placeholder="442038968025">
+      </div>
+    </div>
+    <p class="muted" style="font-size:12px;margin:.4rem 0 0">
+      Generates one DID per integer in <code>[start, end]</code>. End defaults to start. Max 10,000 per import.
+    </p>
+  </div>
+
+  <div class="imp-pane" id="imp-pane-bulk">
+    <div class="field"><label class="label">DIDs (one per line, comma, or space)</label>
+      <textarea id="imp-bulk-text" rows="9" placeholder="442038968001
+442038968002
+442038968003
+525599632249, 525599632250
+# lines starting with # are ignored"></textarea>
+    </div>
+    <p class="muted" style="font-size:12px;margin:.4rem 0 0">
+      Numbers can be in any common format (with or without <code>+</code>, spaces, dashes, parentheses). Anything that doesn't parse as a 6&ndash;15-digit number is skipped with a warning.
+    </p>
+  </div>
+
+  <div class="imp-pane" id="imp-pane-csv">
+    <div class="field"><label class="label">CSV file</label>
+      <input id="imp-csv-file" type="file" accept=".csv,text/csv">
+    </div>
+    <p class="muted" style="font-size:12px;margin:.4rem 0 .6rem">
+      Required column: <code>e164</code>. Optional per-row override columns: <code>country_iso</code>, <code>did_type</code>, <code>supplier_id</code>, <code>channel_cap</code>. Headerless files work too &mdash; columns are read in that order. Per-row values override the form defaults.
+    </p>
+    <a class="link" href="/dids/import/example.csv">{{icon "download"}}Download example CSV</a>
+  </div>
+
+  <div class="row-actions" style="margin-top:.9rem">
+    <button onclick="impStart()">Start import</button>
+    <a class="link" href="/dids">Cancel</a>
+  </div>
+</div>
+
+<div class="imp-progress" id="imp-progress-wrap" style="display:none;max-width:760px">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:.7rem">
+    <div>
+      <div style="font-size:14.5px;font-weight:600" id="imp-headline">Import in progress…</div>
+      <div class="muted" style="font-size:11.5px;margin-top:.2rem" id="imp-subline">Job <code id="imp-jobid"></code></div>
+    </div>
+    <div class="muted" style="font-size:11.5px;font-variant-numeric:tabular-nums" id="imp-rate">— rows/sec</div>
+  </div>
+  <div class="bar"><div id="imp-bar" style="width:0%"></div></div>
+  <div class="imp-counters">
+    <div><div class="label">Total</div><div class="value" id="imp-total">0</div></div>
+    <div class="v-added"><div class="label">Added</div><div class="value" id="imp-added">0</div></div>
+    <div class="v-skipped"><div class="label">Skipped</div><div class="value" id="imp-skipped">0</div></div>
+    <div class="v-errors"><div class="label">Errors</div><div class="value" id="imp-errors">0</div></div>
+    <div><div class="label">Processed</div><div class="value" id="imp-processed">0</div></div>
+  </div>
+
+  <div class="imp-log" id="imp-log"></div>
+
+  <div class="imp-final" id="imp-final" style="display:none">
+    <div id="imp-final-text">Done.</div>
+    <div class="row-actions">
+      <a class="btn ghost" href="/dids">Back to DIDs</a>
+      <button class="ghost" onclick="impReset()">Import more</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ----- Tab switching -----
+function impSwitch(name){
+  document.querySelectorAll('.imp-tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.imp-pane').forEach(p => p.classList.toggle('active', p.id === 'imp-pane-'+name));
+}
+
+// Active mode is whichever pane is currently visible.
+function impActiveMode(){
+  var el = document.querySelector('.imp-tabs button.active');
+  return el ? el.dataset.tab : 'range';
+}
+
+// ----- Start the import -----
+// Builds a FormData with mode-appropriate fields, POSTs /dids/import/start,
+// then swaps the form for the progress panel and opens the SSE stream.
+function impStart(){
+  var mode = impActiveMode();
+  var fd = new FormData();
+  fd.append('mode', mode);
+
+  var supplier = document.getElementById('imp-supplier').value.trim();
+  if (!supplier){ alert('Pick a supplier first.'); return; }
+  fd.append('supplier_id', supplier);
+  fd.append('country_iso', document.getElementById('imp-country').value);
+  fd.append('did_type',    document.getElementById('imp-didtype').value);
+  fd.append('channel_cap', document.getElementById('imp-channelcap').value);
+
+  if (mode === 'range'){
+    fd.append('start_e164', document.getElementById('imp-range-start').value);
+    fd.append('end_e164',   document.getElementById('imp-range-end').value);
+  } else if (mode === 'bulk'){
+    fd.append('bulk_text', document.getElementById('imp-bulk-text').value);
+  } else if (mode === 'csv'){
+    var f = document.getElementById('imp-csv-file').files[0];
+    if (!f){ alert('Pick a CSV file.'); return; }
+    fd.append('csv', f);
+  }
+
+  fetch('/dids/import/start', {method:'POST', body:fd, credentials:'same-origin'})
+    .then(function(r){ return r.json().then(function(j){ return {ok:r.ok, body:j}; }); })
+    .then(function(res){
+      if (!res.ok){ alert('Import failed to start: '+(res.body.error || 'unknown error')); return; }
+      impShowProgress(res.body);
+      impConnect(res.body.stream_url);
+    })
+    .catch(function(e){ alert('Network: '+e); });
+}
+
+// ----- UI state for the running job -----
+var IMP_STATE = { startedAt: 0, total: 0, lastProcessed: 0, lastT: 0 };
+
+function impShowProgress(start){
+  document.getElementById('imp-form-wrap').style.display = 'none';
+  document.getElementById('imp-progress-wrap').style.display = '';
+  document.getElementById('imp-jobid').textContent = start.import_id;
+  document.getElementById('imp-total').textContent = start.total;
+  document.getElementById('imp-final').style.display = 'none';
+  document.getElementById('imp-log').innerHTML = '';
+  IMP_STATE.startedAt = Date.now();
+  IMP_STATE.total = start.total || 0;
+  IMP_STATE.lastProcessed = 0;
+  IMP_STATE.lastT = Date.now();
+}
+
+function impConnect(url){
+  var es = new EventSource(url);
+  es.addEventListener('message', function(m){
+    var ev;
+    try { ev = JSON.parse(m.data); } catch(e){ return; }
+    impHandle(ev);
+    if (ev.type === 'done') es.close();
+  });
+  es.addEventListener('error', function(){
+    // Native EventSource auto-reconnects on transient drops; we only care
+    // about hard failures, which still surface as further onerror calls
+    // until we close. The /status endpoint can be used as a fallback.
+  });
+}
+
+function impHandle(ev){
+  if (ev.type === 'init'){
+    document.getElementById('imp-total').textContent = ev.total;
+    IMP_STATE.total = ev.total;
+    return;
+  }
+  if (ev.type === 'progress'){
+    impSetCounters(ev);
+    return;
+  }
+  if (ev.type === 'row'){
+    impAppendRow(ev);
+    // Keep counter live even if a progress tick is overdue.
+    impSetCountersFromRow(ev);
+    return;
+  }
+  if (ev.type === 'done'){
+    impSetCounters(ev);
+    impFinish(ev);
+    return;
+  }
+}
+
+function impSetCounters(ev){
+  if (typeof ev.total     === 'number') document.getElementById('imp-total').textContent     = ev.total;
+  if (typeof ev.added     === 'number') document.getElementById('imp-added').textContent     = ev.added;
+  if (typeof ev.skipped   === 'number') document.getElementById('imp-skipped').textContent   = ev.skipped;
+  if (typeof ev.errors    === 'number') document.getElementById('imp-errors').textContent    = ev.errors;
+  if (typeof ev.processed === 'number') {
+    document.getElementById('imp-processed').textContent = ev.processed;
+    var pct = ev.total ? Math.min(100, Math.round(ev.processed * 100 / ev.total)) : 0;
+    document.getElementById('imp-bar').style.width = pct + '%';
+    var now = Date.now();
+    var dt = (now - IMP_STATE.lastT) / 1000;
+    if (dt > 0.5){
+      var dp = ev.processed - IMP_STATE.lastProcessed;
+      var rate = dp / dt;
+      document.getElementById('imp-rate').textContent = rate.toFixed(0)+' rows/sec';
+      IMP_STATE.lastProcessed = ev.processed;
+      IMP_STATE.lastT = now;
+    }
+  }
+}
+
+// Per-row events don't carry counter totals — bump locally so the bar
+// stays smooth between 250ms progress ticks.
+function impSetCountersFromRow(ev){
+  if (ev.row_status === 'added')   incEl('imp-added');
+  if (ev.row_status === 'skipped') incEl('imp-skipped');
+  if (ev.row_status === 'error')   incEl('imp-errors');
+  incEl('imp-processed');
+  var proc = parseInt(document.getElementById('imp-processed').textContent, 10) || 0;
+  var pct = IMP_STATE.total ? Math.min(100, Math.round(proc * 100 / IMP_STATE.total)) : 0;
+  document.getElementById('imp-bar').style.width = pct + '%';
+}
+
+function incEl(id){
+  var el = document.getElementById(id);
+  el.textContent = (parseInt(el.textContent, 10) || 0) + 1;
+}
+
+// Append a row to the log. Cap to last 300 rendered rows so a 10k import
+// doesn't blow up the DOM.
+var IMP_LOG_MAX = 300;
+function impAppendRow(ev){
+  var log = document.getElementById('imp-log');
+  var row = document.createElement('div');
+  row.className = 'row';
+  var badge = document.createElement('span');
+  badge.className = 'badge ' + (ev.row_status || '');
+  badge.textContent = ev.row_status || '?';
+  var e164 = document.createElement('span');
+  e164.className = 'e164';
+  e164.textContent = ev.e164 || '—';
+  var meta = document.createElement('span');
+  meta.className = 'meta';
+  if (ev.country || ev.did_type){
+    meta.textContent = [ev.country, ev.did_type].filter(Boolean).join(' · ');
+  }
+  row.appendChild(badge);
+  row.appendChild(e164);
+  if (meta.textContent) row.appendChild(meta);
+  if (ev.reason){
+    var reason = document.createElement('span');
+    reason.className = 'reason';
+    reason.textContent = '— ' + ev.reason;
+    row.appendChild(reason);
+  }
+  log.appendChild(row);
+  while (log.childElementCount > IMP_LOG_MAX) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+function impFinish(ev){
+  document.getElementById('imp-headline').textContent = 'Import complete';
+  document.getElementById('imp-subline').textContent =
+    'Added ' + (ev.added||0) + ' · Skipped ' + (ev.skipped||0) + ' · Errors ' + (ev.errors||0) +
+    ' in ' + ((ev.duration_ms||0)/1000).toFixed(1) + 's';
+  var final = document.getElementById('imp-final');
+  final.style.display = '';
+  final.classList.toggle('errored', (ev.errors || 0) > 0);
+  document.getElementById('imp-final-text').textContent =
+    (ev.errors||0) > 0
+      ? 'Finished with ' + ev.errors + ' error(s). Check the log above; you can edit the affected DIDs manually on /dids.'
+      : 'All ' + (ev.added||0) + ' rows imported cleanly.';
+}
+
+function impReset(){
+  document.getElementById('imp-form-wrap').style.display = '';
+  document.getElementById('imp-progress-wrap').style.display = 'none';
+}
+</script>
+{{end}}

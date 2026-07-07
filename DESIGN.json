@@ -1,0 +1,254 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-16T05:30:00Z",
+  "title": "Design System: DIDStorage Admin GUI (Anti-Reference Baseline)",
+  "extensions": {
+    "colorMeta": {
+      "discord-bg": {
+        "role": "neutral",
+        "displayName": "Discord BG",
+        "canonical": "oklch(28.2% 0.005 270)",
+        "tonalRamp": ["#0d0d0e", "#1e1f22", "#2b2d31", "#313338", "#383a40", "#404249", "#5c5e66", "#9ea1aa"]
+      },
+      "discord-card": {
+        "role": "neutral",
+        "displayName": "Discord Card",
+        "canonical": "oklch(26.5% 0.005 270)",
+        "tonalRamp": ["#0d0d0e", "#1c1d20", "#2b2d31", "#3a3c41", "#494b51", "#585b62", "#7c7f87", "#a5a8b0"]
+      },
+      "discord-sidebar": {
+        "role": "neutral",
+        "displayName": "Discord Sidebar / Border",
+        "canonical": "oklch(22.0% 0.005 270)",
+        "tonalRamp": ["#08090a", "#15161a", "#1e1f22", "#2a2b30", "#37383e", "#43454c", "#6d6e75", "#9a9ba2"]
+      },
+      "discord-sidebar-active": {
+        "role": "neutral",
+        "displayName": "Discord Sidebar Active",
+        "canonical": "oklch(33.0% 0.005 270)",
+        "tonalRamp": ["#15161a", "#26282d", "#383a40", "#404249", "#4b4d54", "#62656d", "#82858e", "#b0b3bb"]
+      },
+      "discord-row-hover": {
+        "role": "neutral",
+        "displayName": "Discord Row Hover",
+        "canonical": "oklch(31.0% 0.005 270)",
+        "tonalRamp": ["#15161a", "#26282d", "#383a40", "#404249", "#4b4d54", "#62656d", "#82858e", "#b0b3bb"]
+      },
+      "discord-tooltip-surface": {
+        "role": "neutral",
+        "displayName": "Discord Tooltip Surface",
+        "canonical": "oklch(16.5% 0.005 270)",
+        "tonalRamp": ["#08090a", "#0e0f11", "#111214", "#1a1b1f", "#26282d", "#3a3c41", "#62656d", "#9a9ba2"]
+      },
+      "discord-text": {
+        "role": "neutral",
+        "displayName": "Discord Text",
+        "canonical": "oklch(86.5% 0.005 270)",
+        "tonalRamp": ["#3a3c41", "#62656d", "#82858e", "#a5a8b0", "#c2c5cb", "#dbdee1", "#eef0f2", "#f7f8f9"]
+      },
+      "discord-text-muted": {
+        "role": "neutral",
+        "displayName": "Discord Text Muted",
+        "canonical": "oklch(65.0% 0.013 270)",
+        "tonalRamp": ["#3a3c41", "#5c5e66", "#7c7f87", "#949ba4", "#b0b6bd", "#cbd0d6", "#e4e7eb", "#f3f5f7"]
+      },
+      "discord-accent-blurple": {
+        "role": "primary",
+        "displayName": "Discord Blurple (anti-reference accent)",
+        "canonical": "oklch(56.2% 0.25 268)",
+        "tonalRamp": ["#1a1d4a", "#272c70", "#363c95", "#454cba", "#5865f2", "#7e87f5", "#a5acf8", "#cdd0fb"]
+      },
+      "discord-accent-text": {
+        "role": "primary",
+        "displayName": "Discord Accent Text",
+        "canonical": "oklch(73.0% 0.13 268)",
+        "tonalRamp": ["#27295a", "#3a3d80", "#525aaa", "#6c75cf", "#9aa6ff", "#b3bbff", "#ccd0ff", "#e6e8ff"]
+      },
+      "discord-ok": {
+        "role": "tertiary",
+        "displayName": "OK Green",
+        "canonical": "oklch(62.0% 0.155 148)",
+        "tonalRamp": ["#0a3019", "#114725", "#185f31", "#1e7740", "#23a55a", "#4cbf7c", "#80d59f", "#bce8c5"]
+      },
+      "discord-warn": {
+        "role": "tertiary",
+        "displayName": "Warn Yellow",
+        "canonical": "oklch(80.0% 0.165 80)",
+        "tonalRamp": ["#3a2c0d", "#5a4515", "#7a5d1d", "#9b7625", "#f0b232", "#f3c25c", "#f6d287", "#fae9c1"]
+      },
+      "discord-err": {
+        "role": "tertiary",
+        "displayName": "Err Red",
+        "canonical": "oklch(60.0% 0.20 25)",
+        "tonalRamp": ["#3a1011", "#5a191c", "#7a2226", "#9b2c31", "#da373c", "#e2666a", "#eb9498", "#f5c6c8"]
+      },
+      "discord-error-ink": {
+        "role": "neutral",
+        "displayName": "Error Ink (warn-button text)",
+        "canonical": "oklch(22.0% 0.005 270)",
+        "tonalRamp": ["#08090a", "#15161a", "#1e1f22", "#2a2b30", "#37383e", "#43454c", "#6d6e75", "#9a9ba2"]
+      }
+    },
+    "typographyMeta": {
+      "headline":  { "displayName": "Headline",  "purpose": "Page-level h1." },
+      "title":     { "displayName": "Title",     "purpose": "Section opener (h2). Uppercase 11px today, but 1.05rem on detail pages." },
+      "body":      { "displayName": "Body",      "purpose": "Page body and modal body." },
+      "body-cell": { "displayName": "Body Cell", "purpose": "Table cells. Smaller than body to fit single-line ellipsis truncation." },
+      "label":     { "displayName": "Label",     "purpose": "Form-field labels, table column headers, sidebar group headers, pill text." },
+      "mono":      { "displayName": "Mono",      "purpose": "Inline <code> spans only. NOT used for measurables in cells today." }
+    },
+    "shadows": [
+      {
+        "name": "lifted-surface",
+        "value": "0 4px 16px rgba(0,0,0,0.5)",
+        "purpose": "Shared drop-shadow on the floating sidebar (mobile) and the modal dialog. The only shadow token in the system."
+      }
+    ],
+    "motion": [
+      {
+        "name": "nav-link-transition",
+        "value": "all 0.15s",
+        "purpose": "Sidebar link colour + background transition on hover and active. The system's only named transition."
+      },
+      {
+        "name": "sidebar-slide",
+        "value": "left 0.2s",
+        "purpose": "Mobile sidebar slide-in/out. Animates the `left` property (banned by upstream design law: do not animate CSS layout properties). Anti-reference."
+      },
+      {
+        "name": "button-hover",
+        "value": "filter 0.15s",
+        "purpose": "Implicit transition on `button:hover { filter: brightness(1.08) }`. No explicit `transition` declared; the browser default applies."
+      }
+    ],
+    "breakpoints": [
+      { "name": "mobile-sidebar-collapse", "value": "880px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Default action button. Discord blurple fill, white text. The dominant anti-reference of the captured system.",
+      "html": "<button class=\"ds-btn-primary\">Save changes</button>",
+      "css": ".ds-btn-primary { background: #5865f2; border: 0; color: #fff; cursor: pointer; font: 500 14px/1.5 ui-sans-serif, system-ui, sans-serif; padding: 0.55rem 1rem; border-radius: 6px; } .ds-btn-primary:hover { filter: brightness(1.08); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(88,101,242,0.32); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary outlined button for low-emphasis actions like Cancel inside modals.",
+      "html": "<button class=\"ds-btn-ghost\">Cancel</button>",
+      "css": ".ds-btn-ghost { background: transparent; border: 1px solid #1e1f22; color: #dbdee1; cursor: pointer; font: 500 14px/1.5 ui-sans-serif, system-ui, sans-serif; padding: 0.55rem 1rem; border-radius: 6px; } .ds-btn-ghost:hover { background: #404249; }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive action. Red fill, white text. Used on delete actions across user, KYC, IP-member, audio-file, etc.",
+      "html": "<button class=\"ds-btn-danger\">Delete user</button>",
+      "css": ".ds-btn-danger { background: #da373c; border: 0; color: #fff; cursor: pointer; font: 500 14px/1.5 ui-sans-serif, system-ui, sans-serif; padding: 0.55rem 1rem; border-radius: 6px; } .ds-btn-danger:hover { filter: brightness(1.1); }"
+    },
+    {
+      "name": "Warn Button",
+      "kind": "button",
+      "refersTo": "button-warn",
+      "description": "Reversible-but-elevated action. Yellow fill with dark ink (7.4:1 AAA contrast). Used on `release` reservation action.",
+      "html": "<button class=\"ds-btn-warn\">Release reservation</button>",
+      "css": ".ds-btn-warn { background: #f0b232; border: 0; color: #1e1f22; cursor: pointer; font: 500 14px/1.5 ui-sans-serif, system-ui, sans-serif; padding: 0.55rem 1rem; border-radius: 6px; } .ds-btn-warn:hover { filter: brightness(1.08); }"
+    },
+    {
+      "name": "Status Pill (active)",
+      "kind": "chip",
+      "refersTo": "pill-active",
+      "description": "Status label. 18% tinted background with matching saturated colour as ink. Active / approved variant.",
+      "html": "<span class=\"ds-pill ds-pill-active\">active</span>",
+      "css": ".ds-pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 11px; font-weight: 500; font-family: ui-sans-serif, system-ui, sans-serif; } .ds-pill-active { background: rgba(35,165,90,0.18); color: #23a55a; }"
+    },
+    {
+      "name": "Status Pill (kyc_pending)",
+      "kind": "chip",
+      "refersTo": "pill-warn",
+      "description": "Warn / pending / kyc_pending / quarantined variant.",
+      "html": "<span class=\"ds-pill ds-pill-warn\">kyc_pending</span>",
+      "css": ".ds-pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 11px; font-weight: 500; font-family: ui-sans-serif, system-ui, sans-serif; } .ds-pill-warn { background: rgba(240,178,50,0.18); color: #f0b232; }"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Stat card or inline panel surface. Card backgrounds carry most stat readouts on the dashboard and most inline panel content on detail pages.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-label\">Active orders</div><div class=\"ds-card-value\">142</div><div class=\"ds-card-sub\">+3 this week</div></div>",
+      "css": ".ds-card { background: #2b2d31; border: 1px solid #1e1f22; border-radius: 8px; padding: 1rem 1.2rem; color: #dbdee1; font-family: ui-sans-serif, system-ui, sans-serif; } .ds-card-label { color: #949ba4; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; } .ds-card-value { font-size: 1.6rem; font-weight: 600; margin-top: 0.3rem; } .ds-card-sub { color: #949ba4; font-size: 12px; margin-top: 0.2rem; }"
+    },
+    {
+      "name": "Table Row",
+      "kind": "custom",
+      "refersTo": "table-row",
+      "description": "38px fixed-height single-line row with ellipsis truncation. The densest defensible row for system-sans 13px body.",
+      "html": "<table class=\"ds-table\"><thead><tr><th>E.164</th><th>Country</th><th>Status</th></tr></thead><tbody><tr><td><code>442038968001</code></td><td>United Kingdom</td><td><span class=\"ds-pill ds-pill-active\">assigned</span></td></tr></tbody></table>",
+      "css": ".ds-table { width: 100%; border-collapse: collapse; background: #2b2d31; border: 1px solid #1e1f22; border-radius: 8px; overflow: hidden; color: #dbdee1; font-family: ui-sans-serif, system-ui, sans-serif; } .ds-table th, .ds-table td { text-align: left; padding: 0.55rem 0.85rem; border-bottom: 1px solid #1e1f22; font-size: 13px; vertical-align: middle; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 340px; height: 38px; } .ds-table th { color: #949ba4; font-weight: 500; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; background: #1e1f22; } .ds-table tr:last-child td { border: 0; } .ds-table tr:hover td { background: #383a40; } .ds-pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 11px; font-weight: 500; } .ds-pill-active { background: rgba(35,165,90,0.18); color: #23a55a; } code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #1e1f22; padding: 0 0.25rem; border-radius: 3px; font-size: 12px; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input-text",
+      "description": "Default text input. Dark fill, hairline border, blurple focus ring (anti-reference hue).",
+      "html": "<div><label class=\"ds-label\">Display name</label><input class=\"ds-input\" type=\"text\" placeholder=\"e.g. Out of service\" /></div>",
+      "css": ".ds-label { display: block; color: #949ba4; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.25rem; font-family: ui-sans-serif, system-ui, sans-serif; } .ds-input { background: #1e1f22; border: 1px solid #1e1f22; border-radius: 6px; padding: 0.5rem 0.7rem; color: #dbdee1; font: 400 14px/1.5 ui-sans-serif, system-ui, sans-serif; width: 100%; box-sizing: border-box; } .ds-input:focus { outline: none; border-color: #5865f2; box-shadow: 0 0 0 3px rgba(88,101,242,0.18); }"
+    },
+    {
+      "name": "Sidebar Link (active, anti-reference idiom)",
+      "kind": "nav",
+      "refersTo": "sidebar-link-active",
+      "description": "The Discord channel-selected idiom. 3px left-border bar in accent colour plus tonal background swap. The most-cited anti-reference in PRODUCT.md.",
+      "html": "<nav class=\"ds-sidebar\"><a class=\"ds-sidebar-link\">Suppliers</a><a class=\"ds-sidebar-link ds-sidebar-link-active\">DIDs</a><a class=\"ds-sidebar-link\">Audio library</a></nav>",
+      "css": ".ds-sidebar { display: flex; flex-direction: column; background: #1e1f22; padding: 1.2rem 0; width: 240px; font-family: ui-sans-serif, system-ui, sans-serif; } .ds-sidebar-link { color: #949ba4; text-decoration: none; padding: 0.55rem 1.5rem; font-weight: 500; font-size: 13.5px; display: flex; align-items: center; gap: 0.6rem; transition: all 0.15s; } .ds-sidebar-link:hover { color: #dbdee1; background: rgba(255,255,255,0.03); } .ds-sidebar-link-active { color: #9aa6ff; background: #404249; border-left: 3px solid #5865f2; padding-left: calc(1.5rem - 3px); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Discord Clone (Anti-Reference Baseline)",
+    "overview": "The current admin GUI is a wholesale port of Discord's chat-app chrome onto a telecom-ops tool. Surface scale, accent colour, sidebar treatment, and tooltip floater all come from the Discord visual vocabulary. PRODUCT.md names this as the dominant anti-reference: it makes a serious operator tool read as a casual chat app and signals 'themed quickly' rather than 'designed for the work'. This document is the inventory of what to throw away, not the spec to extend. The captured palette is dark, Discord-grey-tinted, with a single saturated blurple accent (#5865f2) carrying every action button, focus ring, sidebar-active border, and pagination-current chip. Typography is system-sans only (no monospace for measurable values; <code> is the only place mono shows up). Elevation is flat at rest with one shared drop-shadow on the sidebar and modal. Density is moderate, defaulting to single-line table rows with ellipsis truncation.",
+    "keyCharacteristics": [
+      "Dark Discord-grey palette with one saturated blurple accent.",
+      "System-sans-only typography; mono used incidentally in <code> blocks only.",
+      "Flat at rest; one shared 0 4px 16px rgba(0,0,0,.5) drop-shadow on sidebar and modal.",
+      "Pill vocabulary uses 18% tinted backgrounds with the matching saturated colour as ink.",
+      "Banned by upstream design laws but present in current code: backdrop-filter: blur(2px) on dialog ::backdrop."
+    ],
+    "rules": [
+      { "name": "The One Discord Rule", "body": "Every interactive accent path through the UI lands on #5865f2 (primary fill) or #9aa6ff (link/active text). Concentration is exactly the issue PRODUCT.md objects to: the colour is Discord's wordmark blue, not a colour chosen for the work. Replace with a non-blurple accent in the next pass.", "section": "colors" },
+      { "name": "The Black-Tinted-Toward-Black Rule", "body": "Every surface tier is a Discord grey: bg #313338 is barely warmer than its card #2b2d31, which is barely warmer than its sidebar #1e1f22. The scale is internally consistent but recognisable as Discord at a glance. Replace with a tinted-neutral scale that does not echo Discord's tint signature.", "section": "colors" },
+      { "name": "The Sans-Only Rule", "body": "Today, every measurable value (cents in /cdrs, call-ids in /live, E.164 numbers in /dids, IPs in supplier whitelisting) renders in the body sans. Only inline <code> spans use the mono. PRODUCT.md's design principle 4 explicitly inverts this: the next system commits to mono with tabular figures for every measurable.", "section": "typography" },
+      { "name": "The Uppercase Label Rule", "body": "Section headings (h2), table column headers, and form field labels all use 11px weight 500-600 uppercase with 0.5px letter-spacing. Carried consistently. The new system can keep the uppercase-label idiom (it survives the anti-reference rewrite cleanly) or replace it with a small-caps / weight-only treatment.", "section": "typography" },
+      { "name": "The Flat-Except-Modal-And-Mobile-Sidebar Rule", "body": "No surface at rest uses box-shadow. The shared shadow is reserved for the floating sidebar (mobile) and the modal. Carry forward in the next system if it suits.", "section": "elevation" },
+      { "name": "The Glassmorphism Violation", "body": "dialog::backdrop { backdrop-filter: blur(2px); } is present today and breaks the upstream 'no glassmorphism as default' law. The next system removes the blur (or uses a single deliberate purposeful surface, not the default backdrop).", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep the 38px fixed-row-height + ellipsis truncation idiom on list tables. Densest defensible row for a 13px body. Matches PRODUCT.md's density principle.",
+      "Do keep the floating singleton tooltip pattern. It is the right fix for the 'table cell overflow:hidden clips absolutely-positioned tooltips' problem and survives any palette change.",
+      "Do keep the section / detail-table opt-out (section table td { white-space: normal; }). It is the right escape valve for wrap-friendly cells inside detail pages.",
+      "Do keep the 18% tinted pill backgrounds with saturated ink convention; replace the underlying hues if the next palette changes status colours.",
+      "Do keep the dialog <dialog> pattern itself (HTML5 native, accessible by default); remove only the backdrop-filter: blur(2px).",
+      "Do keep the uppercase 11px label with 0.5px letter-spacing for section headings and form field labels, or replace cleanly with a small-caps / weight-only treatment."
+    ],
+    "donts": [
+      "Don't carry the Discord blurple (#5865f2) accent. PRODUCT.md anti-reference: this exact hue is on the no-fly list.",
+      "Don't carry the Discord surface scale (#313338 bg, #2b2d31 card, #1e1f22 sidebar, #404249 active). At these exact tints, the system reads as Discord at a glance.",
+      "Don't carry the 3px --accent left-border bar on the active sidebar item. This is the Discord channel-selected idiom and signals 'chat app'.",
+      "Don't carry the 'channels-and-DMs' sidebar density (icon + label rows packed tight, hover swap, pill-active state).",
+      "Don't carry Discord's accent-text-on-active-row treatment (the --accent-text #9aa6ff inside the active sidebar link). The system's accent should fill behind white text, not act as ink on a tonal background.",
+      "Don't carry backdrop-filter: blur(2px) on dialog::backdrop. Banned by upstream design laws (no glassmorphism as default). Remove on first refactor.",
+      "Don't carry the sans-only-typography choice. The next system commits to mono with tabular figures for every measurable (cents, durations, IDs, E.164, IPs, call-ids).",
+      "Don't treat <code> as the only mono surface. It is incidental, not systematic. The next system uses mono structurally.",
+      "Don't carry the muted-grey-on-very-dark-grey <th> background (#1e1f22). Reads as Discord chat-area header.",
+      "Don't rely on the single --shadow: 0 4px 16px rgba(0,0,0,.5) for both the floating sidebar and the modal. The next system either picks a different shadow vocabulary or commits more deliberately to flat-with-tonal-layering.",
+      "Don't rely on filter: brightness(1.08) as the only hover treatment for primary buttons. The next system commits to a real hover colour (or a real hover treatment) per variant.",
+      "Don't carry the :root palette names (--bg, --card, --accent, --accent-text, --sidebar-active). They encode the Discord-clone vocabulary by name; the next system picks names that describe the work, not the source app.",
+      "Don't introduce side-stripe borders > 1px as decorative accents anywhere.",
+      "Don't introduce gradient text.",
+      "Don't introduce the SaaS hero-metric template on the / dashboard (big number + small label + supporting stats + gradient accent)."
+    ]
+  }
+}

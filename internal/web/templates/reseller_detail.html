@@ -1,0 +1,151 @@
+{{define "content"}}
+<div class="actions-bar">
+  <h1 style="margin:0">Reseller · {{.Reseller.Name}} <span class="muted" style="font-size:14px">#{{.Reseller.ID}}</span></h1>
+  <a class="link" href="/resellers">{{icon "arrow-left"}}all resellers</a>
+</div>
+
+{{if .NewKey}}
+<div class="section" style="border-color:var(--accent)">
+  <h2>New API key — copy now, won't be shown again</h2>
+  {{$parts := split .NewKey "|"}}
+  <div class="field"><label class="label">Name</label><div class="copy">{{index $parts 0}}</div></div>
+  <div class="field"><label class="label">Secret</label><div class="copy">{{index $parts 1}}</div></div>
+  <p class="muted" style="font-size:12px">Use as <code>Authorization: Bearer {{index $parts 1}}</code> on reseller API requests.</p>
+</div>
+{{end}}
+
+<div class="cards">
+  <div class="card">
+    <div class="label">Users</div>
+    <div class="value">{{.Stats.Users}}</div>
+    <div class="sub">{{.Stats.ActiveUsers}} active</div>
+  </div>
+  <div class="card">
+    <div class="label">Active orders</div>
+    <div class="value">{{.Stats.ActiveOrders}}</div>
+    <div class="sub">per-DID rentals</div>
+  </div>
+  <div class="card">
+    <div class="label">Total balance</div>
+    <div class="value">${{printf "%.2f" .Stats.TotalBalanceDoll}}</div>
+    <div class="sub">across all users</div>
+  </div>
+  <div class="card">
+    <div class="label">CDRs (30d)</div>
+    <div class="value">{{.Stats.CDRs30d}}</div>
+    <div class="sub">${{printf "%.2f" .Stats.Revenue30dDoll}} billed</div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Details</h2>
+  <table>
+  <tbody>
+    <tr><td class="muted">Status</td><td><span class="pill pill-{{.Reseller.Status}}">{{.Reseller.Status}}</span></td></tr>
+    <tr><td class="muted">Brand name <span class="muted" style="font-size:11px">(white-label, used to sanitize traces)</span></td><td>{{if .Reseller.BrandName}}{{.Reseller.BrandName}}{{else}}<span class="muted">— not set —</span>{{end}}</td></tr>
+    <tr><td class="muted">Portal hostname</td><td><code>{{if .Reseller.Hostname}}{{.Reseller.Hostname}}{{else}}—{{end}}</code></td></tr>
+    <tr><td class="muted">Created</td><td>{{.Reseller.Created}}</td></tr>
+  </tbody>
+  </table>
+</div>
+
+<div class="section">
+  <div class="actions-bar">
+    <h2 style="margin:0">Users <span class="muted" style="font-size:13px">({{.Stats.Users}})</span></h2>
+    <a class="link" href="/users?reseller_id={{.Reseller.ID}}">view all in /users {{icon "arrow-right"}}</a>
+  </div>
+  {{if .Users}}
+  <table>
+  <thead><tr><th>External ID</th><th>Label</th><th>Status</th><th>Balance</th><th>Orders</th><th></th></tr></thead>
+  <tbody>
+  {{range .Users}}
+    <tr>
+      <td><code>{{if .ExternalID}}{{.ExternalID}}{{else}}—{{end}}</code></td>
+      <td>{{if .Label}}{{.Label}}{{else}}<em class="muted">#{{.ID}}</em>{{end}}</td>
+      <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+      <td>${{printf "%.2f" .BalanceDollars}}</td>
+      <td>{{.OrderCount}}</td>
+      <td class="right"><a class="link" href="/users/{{.ID}}">open {{icon "arrow-right"}}</a></td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}
+  <p class="muted">This reseller has no users yet.</p>
+  {{end}}
+</div>
+
+<div class="section">
+  <h2>Active DIDs <span class="muted" style="font-size:13px">({{len .DIDs}})</span></h2>
+  {{if .DIDs}}
+  <table>
+  <thead><tr><th>E.164</th><th>Country</th><th>Type</th><th>User</th><th>Channels</th><th>Route</th></tr></thead>
+  <tbody>
+  {{range .DIDs}}
+    <tr>
+      <td><code>{{.E164}}</code></td>
+      <td>{{.Country}}</td>
+      <td>{{didtype .Type}}</td>
+      <td><a class="link" href="/users/{{.UserID}}"><code>{{if .UserRef}}{{.UserRef}}{{else}}#{{.UserID}}{{end}}</code></a></td>
+      <td>{{.Channels}}</td>
+      <td class="muted">{{siptarget .RouteKind .RouteTarget}}</td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}
+  <p class="muted">No active DIDs assigned.</p>
+  {{end}}
+</div>
+
+<div class="section">
+  <h2>Recent CDRs <span class="muted" style="font-size:13px">(last 25)</span></h2>
+  {{if .CDRs}}
+  <table>
+  <thead><tr><th>Started</th><th>DID</th><th>User</th><th>From</th><th>Sec</th><th>Charge</th><th>Cause</th></tr></thead>
+  <tbody>
+  {{range .CDRs}}
+    <tr>
+      <td class="muted">{{.Started}}</td>
+      <td><code>{{.DID}}</code></td>
+      <td>{{if .UserRef}}<code>{{.UserRef}}</code>{{else}}<span class="muted">—</span>{{end}}</td>
+      <td class="muted">{{.SrcURI}}</td>
+      <td>{{.Billsec}}</td>
+      <td>${{printf "%.2f" .ChargeDollars}}</td>
+      <td>{{hangupcause .HangupCause}}</td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}
+  <p class="muted">No CDRs yet for this reseller.</p>
+  {{end}}
+</div>
+
+<div class="section">
+  <h2>API keys</h2>
+  {{if .APIKeys}}
+  <table>
+  <thead><tr><th>Name</th><th>Last used</th><th>Created</th><th></th></tr></thead>
+  <tbody>
+  {{range .APIKeys}}
+    <tr>
+      <td>{{.Name}}</td>
+      <td class="muted">{{if .LastUsed}}{{.LastUsed}}{{else}}<em>never</em>{{end}}</td>
+      <td class="muted">{{.Created}}</td>
+      <td class="right">
+        <form method="post" action="/api-keys/{{.ID}}/revoke" onsubmit="return confirm('Revoke this API key? Cannot be undone.')">
+          <button class="btn-danger">revoke</button>
+        </form>
+      </td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}
+  <p class="muted">No active API keys.</p>
+  {{end}}
+
+  <h2 style="margin-top:1.2rem;font-size:13px">+ Issue new API key</h2>
+  <form method="post" action="/resellers/{{.Reseller.ID}}/api-keys" class="flex" style="max-width:560px">
+    <input class="flex-grow" name="name" placeholder="key label (e.g. prod-server)">
+    <button>Issue key</button>
+  </form>
+</div>
+{{end}}

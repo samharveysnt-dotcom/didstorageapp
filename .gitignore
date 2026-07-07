@@ -1,0 +1,36 @@
+# build artifacts
+/bin/
+*.exe
+*.test
+*.out
+
+# secrets / local config
+.env
+.env.local
+*.pem
+*.key
+.pg_didstorage_password
+
+# editor
+.vscode/
+.idea/
+*.swp
+
+# tmp
+/tmp/
+*.log
+
+# tools
+/scripts/sshpw/sshpw.exe
+/scripts/sshpw/go.sum
+
+# historical snapshots — big, never used at runtime, don't ship in the repo
+/checkpoints/
+
+# session scratchpads / diagnostics from installer runs
+/scratchpad/
+*.pcap
+*.pcapng
+
+# node artefacts (in case anything JS-adjacent lands here)
+node_modules/

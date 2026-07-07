@@ -1,0 +1,226 @@
+{{define "content"}}
+<div class="actions-bar">
+  <h1 style="margin:0">Resellers <span class="muted" style="font-size:14px">({{.Total}})</span></h1>
+  <button class="modal-trigger" onclick="openResellerCreate()">{{icon "plus"}}New reseller</button>
+</div>
+
+{{if .NewKey}}
+<div class="section" style="border-color:var(--accent)">
+  <h2>New API key — copy now, won't be shown again</h2>
+  {{$parts := split .NewKey "|"}}
+  <div class="field"><label class="label">Name</label><div class="copy">{{index $parts 0}}</div></div>
+  <div class="field"><label class="label">Secret</label><div class="copy">{{index $parts 1}}</div></div>
+  <p class="muted" style="font-size:12px">Use as <code>Authorization: Bearer {{index $parts 1}}</code> on reseller API requests.</p>
+</div>
+{{end}}
+
+<form class="toolbar-band is-stack" method="get" action="/resellers">
+  <div class="row">
+    <input class="grow" name="q" value="{{.FilterQ}}" placeholder="Search every reseller by name, brand, or portal hostname">
+    <select name="status">
+      <option value=""         {{if eq .FilterStatus ""}}selected{{end}}>Any status</option>
+      <option value="active"   {{if eq .FilterStatus "active"}}selected{{end}}>active</option>
+      <option value="inactive" {{if eq .FilterStatus "inactive"}}selected{{end}}>inactive</option>
+    </select>
+    <select name="per_page" title="rows per page">
+      {{range $n := slice 25 50 100 250 1000}}
+        <option value="{{$n}}" {{if eq $.Pg.PerPage $n}}selected{{end}}>{{$n}} per page</option>
+      {{end}}
+    </select>
+    <button>{{icon "search"}}Apply</button>
+    <a class="clear" href="/resellers">clear filters</a>
+  </div>
+  <div class="row">
+    <input class="grow" id="resellers-cs-q" type="search" placeholder="Filter visible rows" oninput="dsFilterResellers()">
+    <select id="resellers-cs-keys" onchange="dsFilterResellers()">
+      <option value="">Any API key state</option>
+      <option value="has-keys">Has active keys</option>
+      <option value="no-keys">No active keys</option>
+    </select>
+    <span class="count right-align"><span data-filter-count="resellers-tbody">{{len .Resellers}}</span> visible of {{.Total}} total</span>
+  </div>
+</form>
+<script>
+function dsFilterResellers(){
+  clientFilterTable('resellers-tbody',
+    document.getElementById('resellers-cs-q').value,
+    {keys: document.getElementById('resellers-cs-keys').value});
+}
+</script>
+
+{{if .Resellers}}
+<table>
+<thead><tr>
+  <th><a class="sort {{if eq .Pg.Sort "id"}}active{{end}}" href="{{.Pg.SortLink "id"}}">ID {{.Pg.SortIcon "id"}}</a></th>
+  <th><a class="sort {{if eq .Pg.Sort "name"}}active{{end}}" href="{{.Pg.SortLink "name"}}">Name {{.Pg.SortIcon "name"}}</a></th>
+  <th>Brand / hostname</th>
+  <th><a class="sort {{if eq .Pg.Sort "status"}}active{{end}}" href="{{.Pg.SortLink "status"}}">Status {{.Pg.SortIcon "status"}}</a></th>
+  <th><a class="sort {{if eq .Pg.Sort "users"}}active{{end}}" href="{{.Pg.SortLink "users"}}">Users {{.Pg.SortIcon "users"}}</a></th>
+  <th>Active orders</th>
+  <th class="right">Aggregate balance</th>
+  <th class="right" title="Last 30 days: NRC + MRC + per-channel + per-minute customer charges across all users">30d revenue</th>
+  <th class="right" title="30d revenue − supplier cost (CDR snapshot + supplier MRC/NRC from rate cards)">30d profit</th>
+  <th class="right" title="All-time NRC + MRC + per-channel + per-minute customer charges">Lifetime revenue</th>
+  <th class="right" title="All-time revenue minus all-time supplier cost">Lifetime profit</th>
+  <th>API keys</th>
+  <th>Created</th>
+  <th>Actions</th>
+</tr></thead>
+<tbody id="resellers-tbody">
+{{range .Resellers}}
+<tr data-keys="{{if gt .ActiveAPIKeys 0}}has-keys{{else}}no-keys{{end}}">
+  <td>#{{.ID}}</td>
+  <td><a class="link" href="/resellers/{{.ID}}"><strong>{{.Name}}</strong></a></td>
+  <td>
+    {{if .BrandName}}{{.BrandName}}{{else}}<span class="muted">— no brand —</span>{{end}}
+    {{if .Hostname}}<span class="subtext">· <code>{{.Hostname}}</code></span>{{end}}
+  </td>
+  <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+  <td>{{.UserCount}}</td>
+  <td>{{.ActiveOrders}}</td>
+  <td class="num">${{printf "%.2f" .BalanceDollars}}</td>
+  <td class="num">{{if gt .Revenue30dDollars 0.0}}${{printf "%.2f" .Revenue30dDollars}}{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="num">{{if .HasProfit30d}}<span style="color:{{if lt .Profit30dDollars 0.0}}var(--err){{else}}var(--ok){{end}}">${{printf "%.2f" .Profit30dDollars}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="num">{{if gt .RevenueLifeDollars 0.0}}${{printf "%.2f" .RevenueLifeDollars}}{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="num">{{if .HasProfitLife}}<span style="color:{{if lt .ProfitLifeDollars 0.0}}var(--err){{else}}var(--ok){{end}}">${{printf "%.2f" .ProfitLifeDollars}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+  <td>{{.ActiveAPIKeys}}</td>
+  <td class="muted">{{.Created}}</td>
+  <td class="row-actions">
+    <a class="link" href="/resellers/{{.ID}}">{{icon "external"}}open</a>
+    <button onclick="openResellerEdit(this)"
+            data-id="{{.ID}}"
+            data-name="{{.Name}}"
+            data-brand="{{.BrandName}}"
+            data-host="{{.Hostname}}"
+            data-status="{{.Status}}">{{icon "edit"}}edit</button>
+    <button class="btn-danger" onclick="openResellerDelete(this)"
+            data-id="{{.ID}}"
+            data-name="{{.Name}}"
+            data-users="{{.UserCount}}">{{icon "trash"}}delete</button>
+  </td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{template "pagination" .Pg}}
+{{else}}
+<div class="empty-state">No resellers{{if or .FilterQ .FilterStatus}} match the current filter{{end}}. Click <strong>+ New reseller</strong> above to create one.</div>
+{{end}}
+
+{{if .APIKeys}}
+<h2>All active API keys</h2>
+<table>
+<thead><tr><th>Name</th><th>Reseller</th><th>Last used</th><th>Created</th><th></th></tr></thead>
+<tbody>
+{{range .APIKeys}}
+  <tr>
+    <td>{{.Name}}</td>
+    <td><a class="link" href="/resellers/{{.ResellerID}}">#{{.ResellerID}}</a></td>
+    <td class="muted">{{if .LastUsed}}{{.LastUsed}}{{else}}<em>never</em>{{end}}</td>
+    <td class="muted">{{.Created}}</td>
+    <td class="right">
+      <form method="post" action="/api-keys/{{.ID}}/revoke" onsubmit="return confirm('Revoke this API key? Cannot be undone.')">
+        <button class="btn-danger">{{icon "trash"}}revoke</button>
+      </form>
+    </td>
+  </tr>
+{{end}}
+</tbody></table>
+{{end}}
+
+<!-- ========== Modals ========== -->
+<dialog id="reseller-modal" style="max-width:560px">
+  <div class="modal-head">
+    <h3 id="rm-title">New reseller</h3>
+    <button class="close" type="button" aria-label="Close dialog" onclick="closeModal('reseller-modal')">×</button>
+  </div>
+  <form method="post" id="rm-form">
+    <div class="modal-body">
+      <div class="field"><label class="label">Name <span class="muted" style="font-weight:400">(internal — not shown to customers)</span></label>
+        <input name="name" id="rm-name" required maxlength="80" autofocus>
+      </div>
+      <div class="field"><label class="label">Brand name
+        <span class="tip" data-tip="The white-label brand string. Used in customer-facing surfaces (invoices, support emails) and as the SIP-trace IP-rewrite label so resellers don't see our supplier IPs.">{{icon "info"}}</span>
+        </label>
+        <input name="brand_name" id="rm-brand" maxlength="80" placeholder="e.g. AcmeVoice">
+      </div>
+      <div class="field"><label class="label">Portal hostname (optional)</label>
+        <input name="portal_hostname" id="rm-host" placeholder="portal.reseller.example">
+      </div>
+      <div class="field" id="rm-status-wrap" style="display:none">
+        <label class="label">Status</label>
+        <select name="status" id="rm-status">
+          <option value="active">active</option>
+          <option value="inactive">inactive</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('reseller-modal')">Cancel</button>
+      <button>{{icon "check"}}<span id="rm-submit-label">Create reseller</span></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="reseller-delete-modal">
+  <div class="modal-head">
+    <h3>Delete reseller <span id="rdm-label" class="muted"></span></h3>
+    <button class="close" type="button" aria-label="Close dialog" onclick="closeModal('reseller-delete-modal')">×</button>
+  </div>
+  <form method="post" id="rdm-form">
+    <div class="modal-body">
+      <p style="margin-top:0;color:var(--err)"><strong>Irreversible.</strong></p>
+      <p class="muted" style="font-size:13px">All revoked + active API keys for this reseller are also dropped. The reseller can only be deleted if it has <strong id="rdm-users">0</strong> users — reassign or delete them first.</p>
+      <div class="field">
+        <label class="label">Type the reseller's id (#<span id="rdm-id"></span>) to confirm</label>
+        <input name="confirm_id" id="rdm-confirm" required>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('reseller-delete-modal')">Cancel</button>
+      <button type="submit" class="btn-danger" id="rdm-go">{{icon "trash"}}Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+function openResellerCreate(){
+  document.getElementById('rm-title').textContent  = 'New reseller';
+  document.getElementById('rm-submit-label').textContent = 'Create reseller';
+  document.getElementById('rm-form').action        = '/resellers';
+  document.getElementById('rm-name').value         = '';
+  document.getElementById('rm-brand').value        = '';
+  document.getElementById('rm-host').value         = '';
+  document.getElementById('rm-status-wrap').style.display = 'none';
+  openModal('reseller-modal');
+}
+function openResellerEdit(btn){
+  document.getElementById('rm-title').textContent  = 'Edit reseller · ' + btn.dataset.name;
+  document.getElementById('rm-submit-label').textContent = 'Save';
+  document.getElementById('rm-form').action        = '/resellers/' + btn.dataset.id;
+  document.getElementById('rm-name').value         = btn.dataset.name  || '';
+  document.getElementById('rm-brand').value        = btn.dataset.brand || '';
+  document.getElementById('rm-host').value         = btn.dataset.host  || '';
+  document.getElementById('rm-status').value       = btn.dataset.status || 'active';
+  document.getElementById('rm-status-wrap').style.display = '';
+  openModal('reseller-modal');
+}
+function openResellerDelete(btn){
+  document.getElementById('rdm-label').textContent  = '· ' + btn.dataset.name;
+  document.getElementById('rdm-id').textContent     = btn.dataset.id;
+  document.getElementById('rdm-users').textContent  = btn.dataset.users;
+  document.getElementById('rdm-form').action        = '/resellers/' + btn.dataset.id + '/delete';
+  document.getElementById('rdm-confirm').value      = '';
+  // Custom validation that the typed id matches.
+  document.getElementById('rdm-form').onsubmit = function(){
+    var typed = document.getElementById('rdm-confirm').value.trim();
+    if (typed !== String(btn.dataset.id)){
+      alert('id mismatch — type ' + btn.dataset.id + ' to confirm');
+      return false;
+    }
+    return true;
+  };
+  openModal('reseller-delete-modal');
+}
+</script>
+{{end}}

@@ -1,0 +1,35 @@
+{{define "content"}}
+<h1>{{if .IsNew}}New user{{else}}Edit user{{end}}</h1>
+<div class="section" style="max-width:560px">
+<form method="post" action="/users">
+  <div class="field">
+    <label class="label">External ID <span class="muted">(reseller's reference / customer number)</span></label>
+    <input name="external_id" placeholder="e.g. ACME-2026-00123" value="{{.User.ExternalID}}">
+  </div>
+  <div class="field">
+    <label class="label">Label <span class="muted">(human-readable, optional)</span></label>
+    <input name="label" placeholder="e.g. Acme Corp main office" value="{{.User.Label}}">
+  </div>
+  <div class="field">
+    <label class="label">Contact email <span class="muted">(optional, for ops only)</span></label>
+    <input name="contact_email" type="email" value="{{.User.ContactEmail}}">
+  </div>
+  <div class="fieldgrid">
+    <div class="field"><label class="label">Reseller (optional)</label>
+      <select name="reseller_id">
+        <option value="">— direct (no reseller) —</option>
+        {{range .Resellers}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+    </div>
+    <div class="field"><label class="label">Global channel cap (blank or -1 = uncapped)</label>
+      <input name="global_channel_cap" type="number" placeholder="-1 = uncapped">
+    </div>
+  </div>
+  <div class="row-actions">
+    <button type="submit">Create user</button>
+    <a class="link" href="/users">cancel</a>
+  </div>
+  <p class="muted" style="font-size:12px;margin-top:.6rem">Balance starts at $0 — top up after creating. KYC bundles are uploaded after the user exists. At least one of external_id, label, or contact_email is required.</p>
+</form>
+</div>
+{{end}}

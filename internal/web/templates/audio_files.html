@@ -1,0 +1,215 @@
+{{define "content"}}
+<div class="actions-bar">
+  <h1 style="margin:0">Audio library <span class="muted" style="font-size:14px;font-weight:500"><span data-filter-count="audio-tbody">{{len .Files}}</span></span></h1>
+  <div class="row" style="gap:.4rem">
+    <a class="btn-secondary" href="/audio-groups">Groups</a>
+    <button class="btn-secondary" onclick="openModal('bulk-upload-modal')">+ Bulk upload</button>
+    <button onclick="openModal('upload-modal')">+ Upload audio</button>
+  </div>
+</div>
+
+<form class="toolbar-band is-stack" onsubmit="event.preventDefault()"
+      oninput="clientFilterTable('audio-tbody', this.elements.q.value, {status: this.elements.fstatus.value, format: this.elements.fformat.value})">
+  <div class="row">
+    <input class="grow" name="q" type="search" placeholder="Filter visible rows by clip name or original filename">
+    <select name="fstatus">
+      <option value="">Any status</option>
+      <option value="inuse">In use</option>
+      <option value="unused">Unused</option>
+    </select>
+    <select name="fformat">
+      <option value="">Any format</option>
+      <option value="slin">slin</option>
+    </select>
+    <button type="reset" class="ghost" onclick="setTimeout(function(){document.querySelector('.toolbar-band').dispatchEvent(new Event('input',{bubbles:true}));},0)">Reset</button>
+  </div>
+  <div class="row">
+    <span class="muted" style="font-size:12px">
+      Clips attach to reserved DIDs as the playback target. Asterisk answers, plays the clip, then hangs up.
+      Uploads convert to 8&nbsp;kHz mono 16-bit PCM so every supplier-side codec plays back cleanly.
+    </span>
+  </div>
+</form>
+
+{{if .Files}}
+<table>
+  <thead><tr>
+    <th>Name</th>
+    <th>Duration</th>
+    <th>Size</th>
+    <th>Format</th>
+    <th>Original filename</th>
+    <th>Uploaded</th>
+    <th>By</th>
+    <th>Status</th>
+    <th>Listen</th>
+    <th>Actions</th>
+  </tr></thead>
+  <tbody id="audio-tbody">
+  {{range .Files}}
+  <tr data-status="{{if gt .InUseByDIDs 0}}inuse{{else}}unused{{end}}" data-format="{{.Format}}">
+    <td><strong>{{.Name}}</strong></td>
+    <td class="num num-sm">{{.Duration}}</td>
+    <td class="num num-sm">{{.SizeBytes}}&nbsp;B</td>
+    <td><code>{{.Format}}</code></td>
+    <td class="muted">{{if .OriginalFilename}}{{.OriginalFilename}}{{else}}—{{end}}</td>
+    <td class="muted">{{.CreatedAt}}</td>
+    <td class="muted">{{if .CreatedBy}}{{.CreatedBy}}{{else}}—{{end}}</td>
+    <td>
+      {{if gt .InUseByDIDs 0}}
+        <span class="pill pill-assigned">in use · {{.InUseByDIDs}}</span>
+      {{else}}
+        <span class="pill pill-available">unused</span>
+      {{end}}
+    </td>
+    <td>
+      <audio controls preload="none" src="/audio-files/{{.ID}}/play" style="height:30px;max-width:200px"></audio>
+    </td>
+    <td class="row-actions">
+      <button class="btn-secondary" onclick="openRenameModal({{.ID}}, '{{.Name}}')">rename</button>
+      <form method="post" action="/audio-files/{{.ID}}/delete" style="display:inline"
+            onsubmit="return confirm('Delete {{.Name}}? This cannot be undone.')">
+        <button class="btn-danger" {{if gt .InUseByDIDs 0}}disabled title="release the reservation first"{{end}}>delete</button>
+      </form>
+    </td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}
+<div class="section" style="text-align:center;padding:2rem">
+  <p class="muted" style="margin:0 0 .6rem">No audio uploaded yet.</p>
+  <p class="muted" style="margin:0;font-size:12px">
+    Upload your first clip and it'll appear in the reserve-DID dropdown right away.
+  </p>
+  <p style="margin-top:1rem;margin-bottom:0">
+    <button onclick="openModal('upload-modal')">+ Upload audio</button>
+  </p>
+</div>
+{{end}}
+
+<dialog id="upload-modal">
+  <div class="modal-head">
+    <h3>Upload audio</h3>
+    <button class="close" type="button" aria-label="Close upload dialog" onclick="closeModal('upload-modal')">×</button>
+  </div>
+  <form method="post" action="/audio-files" enctype="multipart/form-data">
+    <div class="modal-body">
+      <p class="muted" style="margin-top:0;font-size:12px">
+        Accepted: mp3, wav, m4a, ogg, opus, flac, aac, webm, slin, ulaw, alaw, gsm.
+        Max {{div .MaxUploadBytes 1048576}}&nbsp;MB. Stereo is downmixed; high sample
+        rates are resampled to 8&nbsp;kHz mono 16-bit.
+      </p>
+      <div class="field">
+        <label class="label">Display name <span class="muted">(optional — defaults to filename)</span></label>
+        <input name="name" placeholder="e.g. Out of service, please call again">
+      </div>
+      <div class="field">
+        <label class="label">File</label>
+        <input type="file" name="audio" accept=".mp3,.wav,.m4a,.ogg,.opus,.flac,.aac,.webm,.slin,.sln,.ulaw,.alaw,.gsm,audio/*" required>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('upload-modal')">Cancel</button>
+      <button>Upload &amp; convert</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="bulk-upload-modal" style="max-width:560px">
+  <div class="modal-head">
+    <h3>Bulk upload audio</h3>
+    <button class="close" type="button" aria-label="Close bulk upload" onclick="closeModal('bulk-upload-modal')">×</button>
+  </div>
+  <form method="post" action="/audio-files/bulk" enctype="multipart/form-data">
+    <div class="modal-body">
+      <p class="muted" style="margin-top:0;font-size:12px">
+        Pick several files at once. Each gets converted to 8&nbsp;kHz mono and saved as
+        <code>&lt;prefix&gt;-1</code>, <code>&lt;prefix&gt;-2</code>, …
+        If an existing prefix has e.g. 1–3, the batch continues from <code>-4</code>.
+        Optionally drop the whole batch straight into an existing audio group.
+      </p>
+      <div class="field">
+        <label class="label">Name prefix</label>
+        <input name="name_prefix" required maxlength="60"
+               placeholder="e.g. welcome, ivr_after_hours, demo_clips">
+      </div>
+      <div class="field">
+        <label class="label">Add to group <span class="muted">(optional)</span></label>
+        <select name="group_id" id="bulk-group-select">
+          <option value="">— none (just upload to library) —</option>
+        </select>
+        <span class="muted" style="font-size:11.5px;margin-top:.3rem;display:block">
+          Files added to a group can serve as a rotating set on an <em>audio_group</em>-kind reserved DID
+          (random-no-repeat per call). <a class="link" href="/audio-groups">Manage groups</a>.
+        </span>
+      </div>
+      <div class="field">
+        <label class="label">Files (pick multiple)</label>
+        <input type="file" name="audio" multiple required
+               accept=".mp3,.wav,.m4a,.ogg,.opus,.flac,.aac,.webm,.slin,.sln,.ulaw,.alaw,.gsm,audio/*">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('bulk-upload-modal')">Cancel</button>
+      <button>Upload &amp; convert all</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="rename-modal">
+  <div class="modal-head">
+    <h3>Rename audio</h3>
+    <button class="close" type="button" aria-label="Close rename dialog" onclick="closeModal('rename-modal')">×</button>
+  </div>
+  <form method="post" id="rename-form">
+    <div class="modal-body">
+      <p class="muted" style="margin-top:0;font-size:12px">
+        Renaming only changes the label shown in dropdowns. The on-disk filename
+        stays the same so any DID already reserved with this clip keeps working
+        without a reload.
+      </p>
+      <div class="field">
+        <label class="label">Display name</label>
+        <input name="name" id="rename-input" required maxlength="80">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('rename-modal')">Cancel</button>
+      <button>Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+function openRenameModal(id, currentName){
+  document.getElementById('rename-form').action = '/audio-files/' + id + '/rename';
+  document.getElementById('rename-input').value = currentName;
+  openModal('rename-modal');
+  setTimeout(function(){ document.getElementById('rename-input').focus(); }, 50);
+}
+
+// Populate the bulk upload's "Add to group" dropdown lazily — first time
+// the modal is shown we fetch /audio-groups/options.json so the list
+// always reflects current groups without re-rendering the whole page.
+(function(){
+  var loaded = false;
+  var orig = window.openModal;
+  window.openModal = function(id){
+    orig(id);
+    if (id === 'bulk-upload-modal' && !loaded){
+      loaded = true;
+      fetch('/audio-groups/options.json').then(function(r){return r.json();}).then(function(groups){
+        var sel = document.getElementById('bulk-group-select');
+        groups.forEach(function(g){
+          var o = document.createElement('option');
+          o.value = g.id;
+          o.textContent = g.name + ' (' + g.member_count + ' clip' + (g.member_count === 1 ? '' : 's') + ')';
+          sel.appendChild(o);
+        });
+      }).catch(function(){ loaded = false; });
+    }
+  };
+})();
+</script>
+{{end}}

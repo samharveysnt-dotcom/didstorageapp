@@ -1,0 +1,17 @@
+BEGIN;
+ALTER INDEX IF EXISTS cdrs_order_started_idx        RENAME TO cdrs_user_started_idx;
+ALTER INDEX IF EXISTS balance_ledger_order_time_idx RENAME TO balance_ledger_user_time_idx;
+ALTER INDEX IF EXISTS did_assignments_order_idx     RENAME TO did_assignments_user_idx;
+ALTER INDEX IF EXISTS sip_accounts_order_idx        RENAME TO sip_accounts_user_idx;
+ALTER TABLE cdrs            RENAME COLUMN order_id TO user_id;
+ALTER TABLE balance_ledger  RENAME COLUMN order_id TO user_id;
+ALTER TABLE did_assignments RENAME COLUMN order_id TO user_id;
+ALTER TABLE sip_accounts    RENAME COLUMN order_id TO user_id;
+DROP INDEX IF EXISTS orders_reseller_idx;
+DROP INDEX IF EXISTS orders_reseller_external_uq;
+ALTER TABLE orders DROP COLUMN IF EXISTS label;
+ALTER TABLE orders DROP COLUMN IF EXISTS external_id;
+ALTER TABLE orders RENAME COLUMN contact_email TO email;
+ALTER TABLE orders ADD COLUMN password_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE orders RENAME TO users;
+COMMIT;

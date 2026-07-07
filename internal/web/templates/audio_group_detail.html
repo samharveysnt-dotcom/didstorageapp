@@ -1,0 +1,112 @@
+{{define "content"}}
+<div class="actions-bar">
+  <div>
+    <p class="muted" style="margin:0 0 .2rem;font-size:12px">
+      <a class="link" href="/audio-groups">← all groups</a>
+    </p>
+    <h1 style="margin:0">{{.Group.Name}}
+      <span class="muted" style="font-size:14px;font-weight:500">· {{.Group.MemberCount}} clip{{if ne .Group.MemberCount 1}}s{{end}}{{if gt .Group.DIDUsage 0}} · in use on {{.Group.DIDUsage}} DID{{if ne .Group.DIDUsage 1}}s{{end}}{{end}}</span>
+    </h1>
+  </div>
+  <div class="row" style="gap:.4rem">
+    <button class="btn-secondary" onclick="openModal('edit-group-modal')">edit</button>
+    <form method="post" action="/audio-groups/{{.Group.ID}}/delete" style="display:inline"
+          onsubmit="return confirm('Delete group {{.Group.Name}}? Files inside stay in the library.')">
+      <button class="btn-danger" {{if gt .Group.DIDUsage 0}}disabled title="release the reservation first"{{end}}>delete group</button>
+    </form>
+  </div>
+</div>
+
+{{if .Group.Note}}
+<p class="muted" style="margin:.4rem 0 1rem">{{.Group.Note}}</p>
+{{end}}
+
+<div class="section" style="margin-top:1rem">
+  <h2 style="font-size:13px;margin:0 0 .6rem">Members</h2>
+  {{if .Members}}
+  <table>
+    <thead><tr>
+      <th>#</th>
+      <th>Name</th>
+      <th>Duration</th>
+      <th>Size</th>
+      <th>Added</th>
+      <th>Listen</th>
+      <th>Actions</th>
+    </tr></thead>
+    <tbody>
+    {{range $i, $m := .Members}}
+    <tr>
+      <td class="num num-sm">{{add $i 1}}</td>
+      <td><strong>{{.Name}}</strong></td>
+      <td class="num num-sm">{{.Duration}}</td>
+      <td class="num num-sm">{{.SizeBytes}}&nbsp;B</td>
+      <td class="muted">{{.AddedAt}}</td>
+      <td>
+        <audio controls preload="none" src="/audio-files/{{.ID}}/play" style="height:30px;max-width:200px"></audio>
+      </td>
+      <td class="row-actions">
+        <form method="post" action="/audio-groups/{{$.Group.ID}}/members/{{.ID}}/delete" style="display:inline"
+              onsubmit="return confirm('Remove {{.Name}} from group? The file stays in the library.')">
+          <button class="btn-danger">remove</button>
+        </form>
+      </td>
+    </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted" style="margin:.4rem 0">
+    No clips in this group yet. Use the form below to add an existing clip, or
+    <a class="link" href="/audio-files">bulk-upload into this group from the library</a>.
+  </p>
+  {{end}}
+</div>
+
+<div class="section" style="margin-top:1rem">
+  <h2 style="font-size:13px;margin:0 0 .6rem">Add existing clip</h2>
+  {{if .AvailableFiles}}
+  <form method="post" action="/audio-groups/{{.Group.ID}}/members" class="row" style="gap:.4rem">
+    <select name="audio_file_id" class="grow" required>
+      <option value="">— pick a clip from the library —</option>
+      {{range .AvailableFiles}}
+      <option value="{{.ID}}">{{.Name}} · {{.Duration}}</option>
+      {{end}}
+    </select>
+    <button>Add</button>
+  </form>
+  <p class="muted" style="font-size:11.5px;margin:.5rem 0 0">
+    Files can belong to more than one group. To upload several new files at once and add them all to this group,
+    use bulk upload on the <a class="link" href="/audio-files">library page</a>.
+  </p>
+  {{else}}
+  <p class="muted" style="margin:.4rem 0">
+    Every clip in the library is already in this group. <a class="link" href="/audio-files">Upload more</a> or
+    use bulk upload with this group selected.
+  </p>
+  {{end}}
+</div>
+
+<dialog id="edit-group-modal">
+  <div class="modal-head">
+    <h3>Edit group</h3>
+    <button class="close" type="button" aria-label="Close" onclick="closeModal('edit-group-modal')">×</button>
+  </div>
+  <form method="post" action="/audio-groups/{{.Group.ID}}">
+    <div class="modal-body">
+      <div class="field">
+        <label class="label">Group name</label>
+        <input name="name" required maxlength="60" value="{{.Group.Name}}">
+      </div>
+      <div class="field">
+        <label class="label">Note <span class="muted">(optional)</span></label>
+        <textarea name="note" rows="3" maxlength="400">{{.Group.Note}}</textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('edit-group-modal')">Cancel</button>
+      <button>Save</button>
+    </div>
+  </form>
+</dialog>
+{{end}}

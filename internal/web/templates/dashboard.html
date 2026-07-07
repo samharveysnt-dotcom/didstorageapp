@@ -1,0 +1,35 @@
+{{define "content"}}
+<h1>Dashboard</h1>
+<div class="cards">
+  <div class="card"><div class="label">Suppliers</div><div class="value">{{.Stats.Suppliers}}</div><div class="sub">{{.Stats.IPs}} authorized IPs</div></div>
+  <div class="card"><div class="label">DIDs</div><div class="value">{{.Stats.DIDs}}</div><div class="sub">{{.Stats.AssignedDIDs}} assigned · {{.Stats.AvailableDIDs}} available</div></div>
+  <div class="card"><div class="label">Users</div><div class="value">{{.Stats.Users}}</div><div class="sub">customer-level accounts</div></div>
+  <div class="card"><div class="label">Orders</div><div class="value">{{.Stats.ActiveOrders}}</div><div class="sub">{{.Stats.KycPending}} kyc-pending · {{.Stats.Quarantined}} quarantined</div></div>
+  <div class="card"><div class="label">Total balance</div><div class="value">${{printf "%.2f" .Stats.TotalBalanceDollars}}</div><div class="sub">across all users</div></div>
+  <div class="card"><div class="label">CDRs (24h)</div><div class="value">{{.Stats.CDRs24h}}</div><div class="sub">${{printf "%.2f" .Stats.Revenue24hDollars}} billed</div></div>
+  <div class="card"><div class="label">Active calls</div><div class="value">{{.Stats.ActiveCalls}}</div><div class="sub">live in Redis</div></div>
+  <div class="card"><div class="label">Denied (24h)</div><div class="value">{{.Stats.DeniedCalls24h}}</div><div class="sub">unauthorized_ip / unknown_did</div></div>
+</div>
+
+<h2>Recent CDRs</h2>
+{{if .RecentCDRs}}
+<table>
+<thead><tr><th>Started</th><th>DID</th><th>From</th><th>Duration</th><th>Min</th><th>Charge</th><th>Cause</th></tr></thead>
+<tbody>
+{{range .RecentCDRs}}
+<tr>
+  <td>{{.Started}}</td>
+  <td>{{.DID}}</td>
+  <td>{{sipcaller .SrcURI}}</td>
+  <td><span class="tip" data-tip="{{preciseDuration .Billsec}}">{{compactDuration .Billsec}}</span></td>
+  <td>{{.ChargedMinutes}}</td>
+  <td>${{printf "%.2f" .ChargeDollars}}</td>
+  <td>{{hangupcause .HangupCause}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<div class="empty-state">No calls have landed yet. Once a supplier sends an INVITE and authorise allows it, this list fills in.</div>
+{{end}}
+{{end}}

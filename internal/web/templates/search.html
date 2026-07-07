@@ -1,0 +1,83 @@
+{{define "content"}}
+<h1>Search {{if .Q}}<span class="muted" style="font-size:14px">· “{{.Q}}”</span>{{end}}</h1>
+
+{{if not .Q}}
+<p class="muted">Type into the search bar above. Searches users (external_id / label / email / id), DIDs (e164), orders (id / DID), and CDRs (call_id).</p>
+{{else}}
+
+<div class="section">
+  <h2>Users <span class="muted" style="font-size:13px">({{len .Users}})</span></h2>
+  {{if .Users}}
+  <table>
+  <thead><tr><th>ID</th><th>External</th><th>Label</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {{range .Users}}
+    <tr>
+      <td>#{{.ID}}</td>
+      <td><code>{{.ExternalID}}</code></td>
+      <td>{{.Label}}</td>
+      <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+      <td class="right"><a class="link" href="/users/{{.ID}}">open {{icon "arrow-right"}}</a></td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}<p class="muted">No matches.</p>{{end}}
+</div>
+
+<div class="section">
+  <h2>DIDs <span class="muted" style="font-size:13px">({{len .DIDs}})</span></h2>
+  {{if .DIDs}}
+  <table>
+  <thead><tr><th>E.164</th><th>Status</th><th>Supplier</th></tr></thead>
+  <tbody>
+  {{range .DIDs}}
+    <tr>
+      <td><code>{{.E164}}</code></td>
+      <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+      <td class="muted">{{.Supplier}}</td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}<p class="muted">No matches.</p>{{end}}
+</div>
+
+<div class="section">
+  <h2>Orders <span class="muted" style="font-size:13px">({{len .Orders}})</span></h2>
+  {{if .Orders}}
+  <table>
+  <thead><tr><th>ID</th><th>DID</th><th>User</th><th>Status</th></tr></thead>
+  <tbody>
+  {{range .Orders}}
+    <tr>
+      <td>#{{.ID}}</td>
+      <td><code>{{.E164}}</code></td>
+      <td>{{.User}}</td>
+      <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}<p class="muted">No matches.</p>{{end}}
+</div>
+
+<div class="section">
+  <h2>CDRs <span class="muted" style="font-size:13px">({{len .CDRs}})</span></h2>
+  {{if .CDRs}}
+  <table>
+  <thead><tr><th>Call-ID</th><th>DID</th><th>User</th><th>Started</th><th>State</th><th></th></tr></thead>
+  <tbody>
+  {{range .CDRs}}
+    <tr>
+      <td><code>{{.CallID}}</code></td>
+      <td><code>{{.DID}}</code></td>
+      <td>{{.User}}</td>
+      <td class="muted">{{.Started}}</td>
+      <td><span class="pill pill-{{.State}}">{{.State}}</span></td>
+      <td class="right"><a class="link" href="/cdrs/{{.CallID}}/sip-trace">{{icon "external"}}trace</a></td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}<p class="muted">No matches.</p>{{end}}
+</div>
+
+{{end}}
+{{end}}

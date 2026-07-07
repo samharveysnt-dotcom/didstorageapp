@@ -1,0 +1,254 @@
+{{define "content"}}
+<div class="actions-bar">
+  <h1 style="margin:0">DIDs <span class="muted" style="font-size:14px">({{.Total}})</span></h1>
+  <a class="btn" href="/dids/import">+ Import range</a>
+</div>
+
+<form class="toolbar-band is-stack" method="get" action="/dids">
+  <div class="row">
+    <input class="grow" name="q" value="{{.Pg.Q}}" placeholder="Search every DID by E.164 or supplier name">
+    <select name="status">
+      <option value="">Any status</option>
+      {{range $s := slice "available" "assigned" "reserved" "retired"}}
+        <option value="{{$s}}">{{$s}}</option>
+      {{end}}
+    </select>
+    <select name="per_page" title="rows per page">
+      {{range $n := slice 25 50 100 250 1000}}
+        <option value="{{$n}}" {{if eq $.Pg.PerPage $n}}selected{{end}}>{{$n}} per page</option>
+      {{end}}
+    </select>
+    <button>{{icon "search"}}Apply</button>
+    <a class="clear" href="/dids">clear filters</a>
+  </div>
+  <div class="row">
+    <input class="grow" id="dids-cs-q" type="search" placeholder="Filter visible rows" oninput="dsFilterDids()">
+    <select id="dids-cs-type" onchange="dsFilterDids()">
+      <option value="">Any type</option>
+      <option value="mobile">Mobile</option>
+      <option value="national">National</option>
+      <option value="local">Local</option>
+      <option value="tollfree">Toll Free</option>
+    </select>
+    <span class="count right-align"><span data-filter-count="dids-tbody">{{len .DIDs}}</span> visible of {{.Total}} total</span>
+  </div>
+</form>
+<script>
+function dsFilterDids(){
+  clientFilterTable('dids-tbody',
+    document.getElementById('dids-cs-q').value,
+    {type: document.getElementById('dids-cs-type').value});
+}
+</script>
+
+{{if .DIDs}}
+<table>
+<thead><tr>
+  <th><a class="sort {{if eq .Pg.Sort "e164"}}active{{end}}" href="{{.Pg.SortLink "e164"}}">E.164 <span class="arrow">{{.Pg.SortArrow "e164"}}</span></a></th>
+  <th><a class="sort {{if eq .Pg.Sort "country"}}active{{end}}" href="{{.Pg.SortLink "country"}}">Country <span class="arrow">{{.Pg.SortArrow "country"}}</span></a></th>
+  <th>Type</th>
+  <th><a class="sort {{if eq .Pg.Sort "supplier"}}active{{end}}" href="{{.Pg.SortLink "supplier"}}">Supplier <span class="arrow">{{.Pg.SortArrow "supplier"}}</span></a></th>
+  <th><a class="sort {{if eq .Pg.Sort "status"}}active{{end}}" href="{{.Pg.SortLink "status"}}">Status <span class="arrow">{{.Pg.SortArrow "status"}}</span></a></th>
+  <th>Assigned to / route</th>
+  <th class="num">Ch</th>
+  <th>Actions</th>
+</tr></thead>
+<tbody id="dids-tbody">
+{{range .DIDs}}
+<tr data-type="{{.Type}}">
+  <td><a class="link" href="/dids/{{.ID}}/cdrs"><code>{{.E164}}</code></a></td>
+  <td>{{.Country}}</td>
+  <td>{{didtype .Type}}</td>
+  <td>{{if .SupplierID}}<a class="link" href="/suppliers/{{.SupplierID}}">{{.Supplier}}</a>{{else}}{{.Supplier}}{{end}}</td>
+  <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+  <td class="muted">
+    {{if eq .Status "reserved"}}
+      <span class="pill pill-warn">reserved</span>
+      {{siptarget .ReservedKind .ReservedTarget}}
+      {{if .ReservedNote}}<span class="subtext" title="{{.ReservedNote}}">· {{.ReservedNote}}</span>{{end}}
+    {{else if .AssignedUserID}}
+      <a class="link" href="/users/{{.AssignedUserID}}">{{if .AssignedTo}}{{.AssignedTo}}{{else}}#{{.AssignedUserID}}{{end}}</a>
+      {{if .OrderStatus}} <span class="pill pill-{{.OrderStatus}}">{{.OrderStatus}}</span>{{end}}
+      {{if .RouteTarget}}<span class="subtext">· {{siptarget .RouteKind .RouteTarget}}</span>{{end}}
+    {{else}}—{{end}}
+  </td>
+  <td class="num">{{.Channels}}</td>
+  <td class="row-actions">
+    <a class="link" href="/dids/{{.ID}}/cdrs">{{icon "external"}}CDRs</a>
+    {{if eq .Status "available"}}
+      <button onclick="openReserveModal({{.ID}}, '{{.E164}}')">reserve</button>
+      <form method="post" action="/dids/{{.ID}}/retire" style="display:inline" onsubmit="return confirm('Retire {{.E164}}?')">
+        <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+        <button class="btn-secondary">retire</button>
+      </form>
+    {{else if eq .Status "reserved"}}
+      <form method="post" action="/dids/{{.ID}}/release" style="display:inline" onsubmit="return confirm('Release {{.E164}}?')">
+        <input type="hidden" name="return_to" value="{{$.ReturnTo}}">
+        <button class="btn-warn">release</button>
+      </form>
+    {{end}}
+  </td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{template "pagination" .Pg}}
+{{else}}
+<div class="empty-state">No DIDs match. Start by importing a range from the <a href="/dids/import">+ Import range</a> page.</div>
+{{end}}
+
+<dialog id="reserve-modal">
+  <div class="modal-head">
+    <h3>Reserve DID <span id="reserve-label" class="muted"></span></h3>
+    <button class="close" type="button" aria-label="Close dialog" onclick="closeModal('reserve-modal')">×</button>
+  </div>
+  <form method="post" id="reserve-form">
+    <input type="hidden" name="return_to" value="{{.ReturnTo}}">
+    <div class="modal-body">
+      <p class="muted" style="margin-top:0;font-size:13px">
+        Reserved DIDs route inbound calls without billing or channel limits.
+        Pick a SIP target for testing/staging, an audio clip from the
+        <a class="link" href="/audio-files">library</a> to play a message and hang up,
+        or an <a class="link" href="/audio-groups">audio group</a> to rotate through
+        several clips (a different one per call).
+      </p>
+      <div class="hstack">
+        <div class="field grow">
+          <label class="label">Route kind</label>
+          <select name="route_kind" id="reserve-kind" required onchange="reserveSyncUI()">
+            <option value="sip_uri">sip_uri</option>
+            <option value="ip">ip</option>
+            <option value="sip_account">sip_account</option>
+            <option value="audio">audio_clip</option>
+            <option value="audio_group">audio_group</option>
+          </select>
+        </div>
+        <div class="field grow" id="reserve-target-wrap">
+          <label class="label">Route target</label>
+          <input name="route_target" id="reserve-target" placeholder="sip:test@example  |  1.2.3.4:5060  |  username">
+        </div>
+        <div class="field grow" id="reserve-audio-wrap" style="display:none">
+          <label class="label">Audio clip</label>
+          <select name="audio_file_id" id="reserve-audio">
+            <option value="">— loading… —</option>
+          </select>
+        </div>
+        <div class="field grow" id="reserve-audiogroup-wrap" style="display:none">
+          <label class="label">Audio group</label>
+          <select name="audio_group_id" id="reserve-audiogroup">
+            <option value="">— loading… —</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label class="label">Note (optional)</label>
+        <input name="note" placeholder="why this is reserved">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('reserve-modal')">Cancel</button>
+      <button>Reserve</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+// audio dropdown is fetched once per page load (the dataset is small and
+// rarely changes between modal opens). Cached in window so subsequent
+// reserve-modal opens are instant.
+var __audioOptionsCache = null;
+function loadAudioOptions(){
+  if (__audioOptionsCache) return Promise.resolve(__audioOptionsCache);
+  return fetch('/audio-files/options.json', {credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(list){ __audioOptionsCache = list; return list; })
+    .catch(function(){ return []; });
+}
+
+// Cache for the audio-groups dropdown, populated on first reserve open.
+var __audioGroupOptionsCache = null;
+function loadAudioGroupOptions(){
+  if (__audioGroupOptionsCache) return Promise.resolve(__audioGroupOptionsCache);
+  return fetch('/audio-groups/options.json', {credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(list){ __audioGroupOptionsCache = list; return list; })
+    .catch(function(){ return []; });
+}
+
+function reserveSyncUI(){
+  var kind        = document.getElementById('reserve-kind').value;
+  var tgtWrap     = document.getElementById('reserve-target-wrap');
+  var audioWrap   = document.getElementById('reserve-audio-wrap');
+  var groupWrap   = document.getElementById('reserve-audiogroup-wrap');
+  var tgtInput    = document.getElementById('reserve-target');
+  var audioSel    = document.getElementById('reserve-audio');
+  var groupSel    = document.getElementById('reserve-audiogroup');
+
+  function hideAll(){
+    tgtWrap.style.display = 'none';   tgtInput.required = false;   tgtInput.disabled = true;
+    audioWrap.style.display = 'none'; audioSel.required = false;   audioSel.disabled = true;
+    groupWrap.style.display = 'none'; groupSel.required = false;   groupSel.disabled = true;
+  }
+
+  if (kind === 'audio'){
+    hideAll();
+    audioWrap.style.display = ''; audioSel.required = true; audioSel.disabled = false;
+    if (audioSel.options.length <= 1 && audioSel.options[0].value === ''){
+      loadAudioOptions().then(function(list){
+        audioSel.innerHTML = '';
+        if (!list.length){
+          var o = document.createElement('option');
+          o.value = ''; o.textContent = '— no clips uploaded yet —';
+          audioSel.appendChild(o); audioSel.disabled = true;
+        } else {
+          list.forEach(function(it){
+            var o = document.createElement('option');
+            o.value = it.id;
+            o.textContent = it.name + ' (' + it.duration + ')';
+            audioSel.appendChild(o);
+          });
+        }
+      });
+    }
+  } else if (kind === 'audio_group'){
+    hideAll();
+    groupWrap.style.display = ''; groupSel.required = true; groupSel.disabled = false;
+    if (groupSel.options.length <= 1 && groupSel.options[0].value === ''){
+      loadAudioGroupOptions().then(function(list){
+        groupSel.innerHTML = '';
+        // Filter to groups with at least one member — picking an empty
+        // group at /sipctl/authorize time would deny the call.
+        var usable = list.filter(function(g){ return g.member_count > 0; });
+        if (!usable.length){
+          var o = document.createElement('option');
+          o.value = ''; o.textContent = '— no non-empty groups yet —';
+          groupSel.appendChild(o); groupSel.disabled = true;
+        } else {
+          usable.forEach(function(g){
+            var o = document.createElement('option');
+            o.value = g.id;
+            o.textContent = g.name + ' (' + g.member_count + ' clip' + (g.member_count === 1 ? '' : 's') + ')';
+            groupSel.appendChild(o);
+          });
+        }
+      });
+    }
+  } else {
+    hideAll();
+    tgtWrap.style.display = ''; tgtInput.required = true; tgtInput.disabled = false;
+  }
+}
+
+function openReserveModal(id, e164){
+  document.getElementById('reserve-label').textContent = '· ' + e164;
+  document.getElementById('reserve-form').action = '/dids/'+id+'/reserve';
+  // Reset to default kind so re-opening the modal after an audio pick
+  // doesn't leave the audio dropdown stuck visible.
+  var kindSel = document.getElementById('reserve-kind');
+  kindSel.value = 'sip_uri';
+  document.getElementById('reserve-target').value = '';
+  reserveSyncUI();
+  openModal('reserve-modal');
+}
+</script>
+{{end}}

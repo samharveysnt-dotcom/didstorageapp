@@ -1,0 +1,659 @@
+{{define "content"}}
+<style>
+  .tabs{display:flex;flex-wrap:wrap;gap:.2rem;border-bottom:1px solid var(--border);margin-bottom:1.2rem}
+  .tabs a{padding:.55rem 1rem;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;font-size:13px;font-weight:500;cursor:pointer}
+  .tabs a:hover{color:var(--text)}
+  .tabs a.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .tab-pane{display:none}
+  .tab-pane.active{display:block}
+</style>
+
+<div class="actions-bar">
+  <h1 style="margin:0">User · {{.Heading}} <span class="muted" style="font-size:14px">#{{.User.ID}}</span></h1>
+  <div class="row-actions">
+    <button class="modal-trigger" onclick="openModal('topup-modal')">+ Top up</button>
+    {{if eq .User.Status "active"}}
+      <button class="btn-warn modal-trigger" onclick="openModal('block-modal')">Block user</button>
+    {{else if eq .User.Status "inactive"}}
+      <button class="modal-trigger" onclick="openModal('unblock-modal')">Unblock</button>
+    {{end}}
+    <button class="btn-danger modal-trigger" onclick="openModal('delete-modal')">Delete</button>
+    <a class="link" href="/users">{{icon "arrow-left"}}all users</a>
+  </div>
+</div>
+
+<div class="tabs" id="user-tabs">
+  <a data-tab="overview"   class="active" onclick="showTab(event,'overview')">Overview</a>
+  <a data-tab="orders"     onclick="showTab(event,'orders')">Orders <span class="muted">({{len .Orders}})</span></a>
+  <a data-tab="peers"      onclick="showTab(event,'peers')">Peers <span class="muted">({{len .SIPAccounts}})</span></a>
+  <a data-tab="cdrs"       onclick="showTab(event,'cdrs')">CDRs</a>
+  <a data-tab="kyc"        onclick="showTab(event,'kyc')">KYC <span class="muted">({{len .KYCBundles}})</span></a>
+  <a data-tab="ledger"     onclick="showTab(event,'ledger')">Ledger</a>
+  <a data-tab="compliance" onclick="showTab(event,'compliance')">Compliance Log <span class="muted">({{len .BlockHistory}})</span></a>
+</div>
+
+<!-- ============================================================ Overview -->
+<div class="tab-pane active" data-tab="overview">
+  <div class="cards">
+    <div class="card">
+      <div class="label">Balance</div>
+      <div class="value">${{printf "%.2f" .BalanceDollars}}</div>
+      <div class="sub"><span class="pill pill-{{.User.Status}}">{{.User.Status}}</span> · created {{.User.Created}}</div>
+    </div>
+    <div class="card">
+      <div class="label">External ID</div>
+      <div class="value" style="font-size:1rem">{{if .User.ExternalID}}<code>{{.User.ExternalID}}</code>{{else}}<span class="muted">none</span>{{end}}</div>
+      <div class="sub">{{if .User.Reseller}}<a class="link" href="/resellers/{{.User.ResellerID}}">{{.User.Reseller}}</a>{{else}}direct{{end}}</div>
+    </div>
+    <div class="card">
+      <div class="label">Channel cap</div>
+      <div class="value">{{if .User.GlobalChannelCap}}{{.User.GlobalChannelCap}}{{else}}∞{{end}}</div>
+      <div class="sub">global limit (-1 / blank = uncapped)</div>
+    </div>
+    <div class="card">
+      <div class="label">Compliance exports</div>
+      <div class="value" style="font-size:.95rem;line-height:1.4">
+        <a class="link" href="/users/{{.User.ID}}/export/cdrs.csv">{{icon "download"}}CDRs</a> ·
+        <a class="link" href="/users/{{.User.ID}}/export/ledger.csv">{{icon "download"}}Ledger</a> ·
+        <a class="link" href="/users/{{.User.ID}}/export/blocks.csv">{{icon "download"}}Block log</a>
+      </div>
+      <div class="sub">add ?from=YYYY-MM-DD&amp;to=YYYY-MM-DD</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Edit</h2>
+    <form method="post" action="/users/{{.User.ID}}">
+      <div class="fieldgrid">
+        <div class="field"><label class="label">External ID</label><input name="external_id" value="{{.User.ExternalID}}"></div>
+        <div class="field"><label class="label">Label</label><input name="label" value="{{.User.Label}}"></div>
+        <div class="field"><label class="label">Contact email</label><input name="contact_email" type="email" value="{{.User.ContactEmail}}"></div>
+        <div class="field"><label class="label">Status</label>
+          <select name="status">
+            <option value="active" {{if eq .User.Status "active"}}selected{{end}}>active</option>
+            <option value="inactive" {{if eq .User.Status "inactive"}}selected{{end}}>inactive</option>
+          </select>
+        </div>
+        <div class="field"><label class="label">Channel cap (-1 = uncapped)</label>
+          <input name="global_channel_cap" type="number" value="{{.User.GlobalChannelCap}}">
+        </div>
+      </div>
+      <button>Save changes</button>
+    </form>
+  </div>
+</div>
+
+<!-- ============================================================ Orders -->
+<div class="tab-pane" data-tab="orders">
+  <div class="actions-bar">
+    <h2 style="margin:0">Orders <span class="muted" style="font-size:13px">(per-DID rentals)</span></h2>
+    <button class="modal-trigger" onclick="openModal('order-modal')">+ New order</button>
+  </div>
+  {{if .Orders}}
+  <table>
+  <thead><tr><th>DID</th><th>Status</th><th>KYC</th><th>Ch</th><th>Route</th><th>Next billing</th><th>Actions</th></tr></thead>
+  <tbody>
+  {{range .Orders}}
+    <tr>
+      <td><a class="link" href="/orders/{{.ID}}" title="open order #{{.ID}}"><code>{{.E164}}</code></a></td>
+      <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+      <td>{{if .KycStatus}}<span class="pill pill-{{.KycStatus}}">{{.KycStatus}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+      <td>{{.ChannelCount}}</td>
+      <td class="muted">{{siptarget .RouteKind .RouteTarget}}</td>
+      <td class="muted">{{.NextBillingAt}}</td>
+      <td class="row-actions">
+        <a class="link" href="/orders/{{.ID}}/export/cdrs.csv">{{icon "download"}}CSV</a>
+        {{if or (eq .Status "active") (eq .Status "kyc_pending") (eq .Status "quarantined")}}
+        <button onclick="openOrderEditModal(this)"
+                data-id="{{.ID}}"
+                data-did="{{.E164}}"
+                data-route-kind="{{.RouteKind}}"
+                data-route-target="{{.RouteTarget}}"
+                data-channel-count="{{.ChannelCount}}"
+                data-ann-day="{{.AnniversaryDay}}"
+                data-kyc="{{if .KycBundleID}}{{.KycBundleID}}{{end}}">edit</button>
+        {{end}}
+        <form method="post" action="/orders/{{.ID}}/cancel" style="display:inline" onsubmit="return confirm('Cancel order for {{.E164}}? DID returns to pool.')">
+          <button class="btn-warn">cancel</button>
+        </form>
+      </td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}
+  <p class="muted">No orders yet.</p>
+  {{end}}
+</div>
+
+<!-- ============================================================ Peers (SIP accounts) -->
+<div class="tab-pane" data-tab="peers">
+  <div class="actions-bar">
+    <h2 style="margin:0">SIP peers</h2>
+    <button class="modal-trigger" onclick="openModal('peer-modal')">+ New peer</button>
+  </div>
+  {{if .SIPAccounts}}
+  <table>
+  <thead><tr><th>Username</th><th>Realm</th><th>Created</th><th>Actions</th></tr></thead>
+  <tbody>
+  {{range .SIPAccounts}}
+    <tr>
+      <td><code>{{.Username}}</code></td>
+      <td class="muted">{{.Realm}}</td>
+      <td class="muted">{{.Created}}</td>
+      <td>
+        <form method="post" action="/users/{{$.User.ID}}/sip-accounts/{{.ID}}/delete" onsubmit="return confirm('Delete this SIP account?')">
+          <button class="btn-danger">delete</button>
+        </form>
+      </td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}
+  <p class="muted">No SIP peers yet.</p>
+  {{end}}
+  <p class="muted" style="font-size:12px;margin-top:.6rem">Realm: <code>{{.SIPRealm}}</code> · register softphone with <code>username@45.8.93.244</code>.</p>
+</div>
+
+<!-- ============================================================ CDRs -->
+<div class="tab-pane" data-tab="cdrs">
+  <div class="actions-bar">
+    <h2 style="margin:0">CDRs <span class="muted" style="font-size:13px">(this user · last {{.CDRLimit}})</span></h2>
+    <div class="row-actions">
+      <a class="btn ghost" id="user-cdrs-csv" href="#" onclick="downloadUserCdrsCsv(event,this)" data-uid="{{.User.ID}}">{{icon "download"}}CSV</a>
+      <a class="link" href="/cdrs?user_id={{.User.ID}}">{{icon "external"}}open in /cdrs</a>
+    </div>
+  </div>
+
+  <form method="get" action="/users/{{.User.ID}}" class="toolbar-band">
+    <input type="hidden" name="tab" value="cdrs">
+    {{template "daterange" dict "FromID" "ucdr-from" "ToID" "ucdr-to" "FromName" "cdr_from" "ToName" "cdr_to" "FromValue" .CDRFrom "ToValue" .CDRTo}}
+    <select name="cdr_state">
+      <option value=""         {{if eq .CDRState ""}}selected{{end}}>— any state —</option>
+      <option value="answered" {{if eq .CDRState "answered"}}selected{{end}}>answered</option>
+      <option value="failed"   {{if eq .CDRState "failed"}}selected{{end}}>failed</option>
+    </select>
+    <select name="cdr_limit">
+      {{range $n := slice 25 50 100 250 1000}}
+        <option value="{{$n}}" {{if eq $.CDRLimit $n}}selected{{end}}>{{$n}}/page</option>
+      {{end}}
+    </select>
+    <button>{{icon "search"}}Apply</button>
+    <a class="link" href="/users/{{.User.ID}}#cdrs">clear</a>
+  </form>
+
+  {{if .CDRs}}
+  <table>
+  <thead><tr>
+    <th>Started</th><th>State</th><th>DID</th><th>Order</th><th>From</th><th>To (route)</th>
+    <th>Duration</th><th>Min</th><th>Charge</th><th>Cause</th><th></th>
+  </tr></thead>
+  <tbody>
+  {{range .CDRs}}
+    <tr>
+      <td>{{.Started}}</td>
+      <td>
+        {{if eq .State "answered"}}<span class="pill pill-active">answered</span>
+        {{else if eq .State "no_answer"}}<span class="pill pill-warn">no_answer</span>
+        {{else if eq .State "busy"}}<span class="pill pill-warn">busy</span>
+        {{else if eq .State "rejected"}}<span class="pill pill-suspended">rejected</span>
+        {{else if eq .State "no_route"}}<span class="pill pill-suspended">no_route</span>
+        {{else}}<span class="pill pill-suspended">{{.State}}</span>{{end}}
+      </td>
+      <td><code>{{.DID}}</code></td>
+      <td class="muted">{{if .OrderID}}#{{.OrderID}}{{else}}—{{end}}</td>
+      <td>{{sipcaller .SrcURI}}</td>
+      <td>{{siptarget .RoutedKind .RoutedTarget}}</td>
+      <td><span class="tip" data-tip="{{preciseDuration .Billsec}} ({{.Billsec}}s raw)">{{compactDuration .Billsec}}</span></td>
+      <td>{{.ChargedMinutes}}</td>
+      <td>${{printf "%.2f" .ChargeDollars}}</td>
+      <td>{{hangupcause .HangupCause}}</td>
+      <td class="right"><a class="link" href="/cdrs/{{.CallID}}/sip-trace">{{icon "external"}}trace</a></td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}
+  <p class="muted">No CDRs in this date range.</p>
+  {{end}}
+</div>
+
+<script>
+// CSV download from the user-detail CDRs tab. Carries the active date /
+// state filter through to the export endpoint so you get exactly what you
+// see on screen (just unpaginated).
+function downloadUserCdrsCsv(ev, a){
+  ev.preventDefault();
+  var qs = new URLSearchParams();
+  var f = document.getElementById('ucdr-from'); if (f && f.value) qs.set('from', f.value);
+  var t = document.getElementById('ucdr-to');   if (t && t.value) qs.set('to', t.value);
+  // state isn't supported on the export endpoint yet; ignored gracefully.
+  window.location.href = '/users/'+a.dataset.uid+'/export/cdrs.csv'+(qs.toString()?'?'+qs.toString():'');
+}
+</script>
+
+<!-- ============================================================ KYC -->
+<div class="tab-pane" data-tab="kyc">
+  <div class="actions-bar">
+    <h2 style="margin:0">KYC bundles</h2>
+    <button class="modal-trigger" onclick="openModal('kyc-modal')">+ New bundle</button>
+  </div>
+  {{if .KYCBundles}}
+  <table>
+  <thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Docs</th><th>Created</th><th>Approved</th><th></th></tr></thead>
+  <tbody>
+  {{range .KYCBundles}}
+    <tr>
+      <td>#{{.ID}}</td>
+      <td>{{.Type}}</td>
+      <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+      <td>{{.DocCount}}</td>
+      <td class="muted">{{.Created}}</td>
+      <td class="muted">{{if .Approved}}{{.Approved}}{{else}}—{{end}}</td>
+      <td class="right"><a class="link" href="/kyc-bundles/{{.ID}}">open {{icon "arrow-right"}}</a></td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}
+  <p class="muted">No KYC bundles yet.</p>
+  {{end}}
+</div>
+
+<!-- ============================================================ Ledger -->
+<div class="tab-pane" data-tab="ledger">
+  <div class="actions-bar">
+    <h2 style="margin:0">Recent ledger</h2>
+    <a class="btn ghost" href="/users/{{.User.ID}}/export/ledger.csv">{{icon "download"}}CSV</a>
+  </div>
+  {{if .Ledger}}
+  <table>
+  <thead><tr>
+    <th>When</th>
+    <th>Kind</th>
+    <th class="num">Δ ($)</th>
+    <th class="num">Balance after</th>
+    <th>Reference</th>
+  </tr></thead>
+  <tbody>
+  {{range .Ledger}}
+    <tr>
+      <td class="muted">{{.Created}}</td>
+      <td>{{.Kind}}</td>
+      <td class="num">{{if lt .Delta 0}}<span class="profit-neg">-${{printf "%.2f" (absdollars .Delta)}}</span>{{else}}<span class="profit-pos">+${{printf "%.2f" (dollars .Delta)}}</span>{{end}}</td>
+      <td class="num">${{printf "%.2f" (dollars .Balance)}}</td>
+      <td>
+        {{/* Reference column: link back to the source row of the ledger entry.
+             - call_charge (ref_table=cdrs)   → /cdrs/{call_id}/sip-trace, shows DID
+             - nrc / mrc / manual_adj on order (ref_table=orders) → /orders/{id}, shows DID
+             - mrc / channel_fee (ref_table=billing_runs)       → /orders/{order_id}, shows DID + billing-run id
+             - topup / refund / unstructured manual_adj         → plain context label */}}
+        {{if eq .RefTable "cdrs"}}
+          {{if .RefCallID}}<a class="link" href="/cdrs/{{.RefCallID}}/sip-trace">{{icon "external"}}call {{if .RefDID}}<code>{{.RefDID}}</code>{{end}}</a>{{else}}<span class="muted">call (no trace)</span>{{end}}
+        {{else if eq .RefTable "orders"}}
+          <a class="link" href="/orders/{{.RefID}}">{{icon "external"}}order #{{.RefID}}{{if .RefDID}} <code>{{.RefDID}}</code>{{end}}</a>
+        {{else if eq .RefTable "billing_runs"}}
+          {{if .RefOrderID}}<a class="link" href="/orders/{{.RefOrderID}}">{{icon "external"}}billing run #{{.RefID}}{{if .RefDID}} <code>{{.RefDID}}</code>{{end}}</a>{{else}}<span class="muted">billing run #{{.RefID}}</span>{{end}}
+        {{else if eq .Kind "topup"}}
+          <span class="muted">manual top-up{{if .RefID}} <span class="subtext">#{{.RefID}}</span>{{end}}</span>
+        {{else if eq .Kind "refund"}}
+          <span class="muted">refund{{if .RefID}} <span class="subtext">#{{.RefID}}</span>{{end}}</span>
+        {{else if eq .Kind "manual_adj"}}
+          <span class="muted">manual adjustment</span>
+        {{else}}
+          <span class="muted">—</span>
+        {{end}}
+      </td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}
+  <div class="empty-state">No ledger entries yet. Top-ups, call charges, and monthly billing runs will appear here.</div>
+  {{end}}
+</div>
+
+<!-- ============================================================ Compliance -->
+<div class="tab-pane" data-tab="compliance">
+  <div class="actions-bar">
+    <h2 style="margin:0">Block / compliance log</h2>
+    <a class="btn ghost" href="/users/{{.User.ID}}/export/blocks.csv">{{icon "download"}}CSV</a>
+  </div>
+  {{if .BlockHistory}}
+  <table>
+  <thead><tr><th>When</th><th>Action</th><th>Reason</th><th>KYC ref</th><th>Admin</th></tr></thead>
+  <tbody>
+  {{range .BlockHistory}}
+    <tr>
+      <td class="muted">{{.Created}}</td>
+      <td><span class="pill pill-{{if eq .Action "block"}}suspended{{else}}active{{end}}">{{.Action}}</span></td>
+      <td>{{.Reason}}</td>
+      <td class="muted">{{if .KycBundleID}}<a class="link" href="/kyc-bundles/{{.KycBundleID}}">#{{.KycBundleID}}</a>{{else}}—{{end}}</td>
+      <td class="muted">{{if .By}}{{.By}}{{else}}<em>system</em>{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody></table>
+  {{else}}
+  <p class="muted">No block history.</p>
+  {{end}}
+</div>
+
+<!-- ===== Modals ===== -->
+<dialog id="topup-modal">
+  <div class="modal-head"><h3>Top up balance</h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('topup-modal')">×</button></div>
+  <form method="post" action="/users/{{.User.ID}}/topup">
+    <div class="modal-body">
+      <div class="field"><label class="label">Amount ($)</label><input name="amount" type="number" step="0.01" min="0.01" required autofocus placeholder="50.00"></div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('topup-modal')">Cancel</button>
+      <button>+ Top up</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="kyc-modal">
+  <div class="modal-head"><h3>New KYC bundle</h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('kyc-modal')">×</button></div>
+  <form method="post" action="/users/{{.User.ID}}/kyc-bundles">
+    <div class="modal-body">
+      <div class="hstack">
+        <div class="field grow"><label class="label">Type</label>
+          <select name="type"><option value="person">person</option><option value="company">company</option></select>
+        </div>
+      </div>
+      <div class="field"><label class="label">Notes</label>
+        <textarea name="notes" rows="3" placeholder="legal name / dob / registration #"></textarea>
+      </div>
+      <div class="field"><label class="label">Structured info (JSON, optional)</label>
+        <textarea name="info_json" rows="3" placeholder='{"legal_name":"Acme","reg_no":"123"}'></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('kyc-modal')">Cancel</button>
+      <button>Create bundle</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="peer-modal">
+  <div class="modal-head"><h3>New SIP peer</h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('peer-modal')">×</button></div>
+  <form method="post" action="/users/{{.User.ID}}/sip-accounts">
+    <div class="modal-body">
+      <div class="hstack">
+        <div class="field grow"><label class="label">Username</label><input name="username" required placeholder="extension or alias" autofocus></div>
+        <div class="field grow"><label class="label">Password (6+)</label><input name="password" type="password" required minlength="6"></div>
+      </div>
+      <p class="muted" style="font-size:12px;margin:.4rem 0 0">
+        Realm: <code>{{.SIPRealm}}</code>
+        <span class="tip" data-tip="The SIP authentication realm. The server uses this string when challenging softphones for credentials over MD5 digest auth — it must match the realm you configure on the client side. We also use it as the host part of the SIP URI for in-system routing (route_kind=sip_account).">{{icon "info"}}</span>
+      </p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('peer-modal')">Cancel</button>
+      <button>+ Create peer</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="order-edit-modal" style="max-width:680px">
+  <div class="modal-head">
+    <h3>Edit order <span id="oem-label" class="muted"></span></h3>
+    <button class="close" type="button" aria-label="Close dialog" onclick="closeModal('order-edit-modal')">×</button>
+  </div>
+  <form method="post" id="oem-form" onsubmit="return validateOrderEdit()">
+    <div class="modal-body">
+      <p class="muted" style="margin-top:0;font-size:13px">Fields are pre-filled with the order's current values. Anything you don't change stays the same.</p>
+      <div class="hstack">
+        <div class="field">
+          <label class="label">Route kind</label>
+          <select name="route_kind" id="oem-route-kind" required onchange="oemSyncRouteUI()">
+            <option value="sip_uri">sip_uri</option>
+            <option value="ip">ip</option>
+            <option value="sip_account">sip_account (in-system peer)</option>
+          </select>
+        </div>
+        <div class="field grow">
+          <label class="label">Route target</label>
+          <input name="route_target" id="oem-rt-text" required
+                 placeholder="sip:904@example.com  |  1.2.3.4:5060">
+          <select name="route_target" id="oem-rt-select" disabled style="display:none">
+            {{if .SIPAccounts}}
+              <option value="">— pick a peer —</option>
+              {{range .SIPAccounts}}<option value="{{.Username}}">{{.Username}}@{{$.SIPRealm}}</option>{{end}}
+            {{else}}
+              <option value="" disabled selected>— this user has no SIP peers — create one in the Peers tab —</option>
+            {{end}}
+          </select>
+        </div>
+      </div>
+      <div class="hstack">
+        <div class="field">
+          <label class="label">Channels (≥0)</label>
+          <input name="channel_count" id="oem-channel-count" type="number" min="0" max="8192" required>
+        </div>
+        <div class="field">
+          <label class="label">Anniversary day (1–28)</label>
+          <input name="anniversary_day" id="oem-ann-day" type="number" min="1" max="28" required>
+        </div>
+        <div class="field grow">
+          <label class="label">KYC bundle</label>
+          <select name="kyc_bundle_id" id="oem-kyc">
+            <option value="">— none —</option>
+            {{range .KYCBundles}}<option value="{{.ID}}">#{{.ID}} · {{.Type}} · {{.Status}}</option>{{end}}
+          </select>
+        </div>
+      </div>
+      <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:.4rem;margin-top:.4rem">
+        <input type="checkbox" name="kyc_bundle_clear" value="1" id="oem-kyc-clear" style="width:auto"
+               onchange="document.getElementById('oem-kyc').disabled=this.checked">
+        Detach KYC bundle (force order to <code>kyc_pending</code>)
+      </label>
+      <p id="oem-err" class="error" style="text-align:left;margin-top:.6rem;display:none"></p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('order-edit-modal')">Cancel</button>
+      <button>Save changes</button>
+    </div>
+  </form>
+</dialog>
+<script>
+function openOrderEditModal(btn){
+  var f = document.getElementById('oem-form');
+  f.action = '/orders/'+btn.dataset.id+'/update';
+  document.getElementById('oem-label').textContent = '· DID '+btn.dataset.did;
+  document.getElementById('oem-route-kind').value   = btn.dataset.routeKind   || 'sip_uri';
+  var rt = btn.dataset.routeTarget || '';
+  document.getElementById('oem-rt-text').value   = rt;
+  // Pre-select in the peer dropdown if a matching option exists.
+  var sel = document.getElementById('oem-rt-select');
+  var matched = false;
+  for (var i=0;i<sel.options.length;i++){ if(sel.options[i].value === rt){ sel.value = rt; matched = true; break; } }
+  if (!matched && sel.options.length > 0) sel.selectedIndex = 0;
+  document.getElementById('oem-channel-count').value= btn.dataset.channelCount || '0';
+  document.getElementById('oem-ann-day').value      = btn.dataset.annDay      || '1';
+  document.getElementById('oem-kyc').value          = btn.dataset.kyc         || '';
+  document.getElementById('oem-kyc').disabled       = false;
+  document.getElementById('oem-kyc-clear').checked  = false;
+  document.getElementById('oem-err').style.display  = 'none';
+  oemSyncRouteUI();
+  openModal('order-edit-modal');
+}
+// Toggle between free-text route-target (for sip_uri / ip) and a constrained
+// dropdown of the user's SIP peers (for sip_account). Only one is enabled at
+// a time so the form posts the active value under name="route_target".
+function oemSyncRouteUI(){
+  toggleRouteTargetUI(
+    document.getElementById('oem-route-kind'),
+    document.getElementById('oem-rt-text'),
+    document.getElementById('oem-rt-select'),
+  );
+}
+
+// Same toggle for the New-order modal. The two modals share the exact same
+// shape so we share the helper rather than duplicating it.
+function omSyncRouteUI(){
+  toggleRouteTargetUI(
+    document.getElementById('om-route-kind'),
+    document.getElementById('om-rt-text'),
+    document.getElementById('om-rt-select'),
+  );
+}
+
+function toggleRouteTargetUI(kindSel, textInput, peerSel){
+  if (!kindSel || !textInput || !peerSel) return;
+  var kind = kindSel.value;
+  if (kind === 'sip_account'){
+    textInput.disabled = true;  textInput.style.display = 'none';
+    peerSel.disabled   = false; peerSel.style.display   = '';
+  } else {
+    textInput.disabled = false; textInput.style.display = '';
+    peerSel.disabled   = true;  peerSel.style.display   = 'none';
+  }
+}
+function validateOrderEdit(){
+  var err = document.getElementById('oem-err');
+  err.style.display = 'none';
+  var fail = function(m){ err.textContent = m; err.style.display = 'block'; return false; };
+  var rk  = document.getElementById('oem-route-kind').value;
+  // Read whichever input is currently active (text vs. peer-dropdown).
+  var t = document.getElementById('oem-rt-text');
+  var s = document.getElementById('oem-rt-select');
+  var rt = (rk === 'sip_account' ? s.value : t.value).trim();
+  var ch  = parseInt(document.getElementById('oem-channel-count').value, 10);
+  var ann = parseInt(document.getElementById('oem-ann-day').value, 10);
+  if (!rt) return fail(rk === 'sip_account' ? 'pick a SIP peer (or create one in the Peers tab first)' : 'route target is required');
+  if (rk === 'sip_uri' && !/^(sip:|sips:)/i.test(rt) && !/.+@.+/.test(rt))
+      return fail('sip_uri target should look like sip:user@host[:port] or user@host');
+  if (rk === 'ip' && !/^[\d.:a-fA-F\[\]]+$/.test(rt))
+      return fail('ip target must be a bare ip[:port]');
+  if (rk === 'sip_account' && !/^[a-zA-Z0-9_\-]{1,32}$/.test(rt))
+      return fail('sip_account target must be 1–32 chars [a-zA-Z0-9_-]');
+  if (isNaN(ch) || ch < 0 || ch > 8192) return fail('channels must be 0–8192');
+  if (isNaN(ann) || ann < 1 || ann > 28) return fail('anniversary day must be 1–28');
+  return true;
+}
+</script>
+
+<dialog id="order-modal" style="max-width:680px">
+  <div class="modal-head"><h3>New order (rent a DID)</h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('order-modal')">×</button></div>
+  <form method="post" action="/orders">
+    <input type="hidden" name="user_id" value="{{.User.ID}}">
+    <div class="modal-body">
+      <div class="hstack">
+        <div class="field grow"><label class="label">Available DID</label>
+          <select name="did_id" required>
+            <option value="">— pick —</option>
+            {{range .AvailableDIDs}}<option value="{{.ID}}">{{.E164}} · {{.Country}} · {{didtype .Type}}</option>{{end}}
+          </select>
+        </div>
+        <div class="field"><label class="label">Channels (≥0)</label><input name="channel_count" type="number" min="0" value="2"></div>
+        <div class="field"><label class="label">Anniversary day</label><input name="anniversary_day" type="number" min="1" max="28" value="1"></div>
+      </div>
+      <div class="hstack">
+        <div class="field"><label class="label">Route kind</label>
+          <select name="route_kind" id="om-route-kind" required onchange="omSyncRouteUI()">
+            <option value="sip_uri">sip_uri</option>
+            <option value="ip">ip</option>
+            <option value="sip_account">sip_account (in-system peer)</option>
+          </select>
+        </div>
+        {{/* Free-text input for sip_uri / ip; constrained dropdown of the
+             user's existing SIP peers for sip_account. omSyncRouteUI()
+             flips which one is enabled+visible so the form only submits
+             the active value under name="route_target". */}}
+        <div class="field grow"><label class="label">Route target</label>
+          <input name="route_target" id="om-rt-text" required
+                 placeholder="sip:904@example.com  |  1.2.3.4:5060">
+          <select name="route_target" id="om-rt-select" disabled style="display:none">
+            {{if .SIPAccounts}}
+              <option value="">— pick a peer —</option>
+              {{range .SIPAccounts}}<option value="{{.Username}}">{{.Username}}@{{$.SIPRealm}}</option>{{end}}
+            {{else}}
+              <option value="" disabled selected>— no SIP peers on this user — create one in the Peers tab —</option>
+            {{end}}
+          </select>
+        </div>
+      </div>
+      <div class="field"><label class="label">KYC bundle (optional — without one, order is kyc_pending)</label>
+        <select name="kyc_bundle_id">
+          <option value="">— none —</option>
+          {{range .KYCBundles}}{{if eq .Status "approved"}}<option value="{{.ID}}">#{{.ID}} · {{.Type}} · approved</option>{{end}}{{end}}
+        </select>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('order-modal')">Cancel</button>
+      <button>Create order (NRC will be charged)</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="block-modal">
+  <div class="modal-head"><h3>Block user</h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('block-modal')">×</button></div>
+  <form method="post" action="/users/{{.User.ID}}/block">
+    <div class="modal-body">
+      <p class="muted" style="font-size:13px;margin-top:0">All active orders will be quarantined; inbound calls reply 480.</p>
+      <div class="field"><label class="label">Reason (compliance log)</label><textarea name="reason" rows="3" required></textarea></div>
+      <div class="field"><label class="label">Reference KYC bundle (optional)</label>
+        <select name="kyc_bundle_id">
+          <option value="">— none —</option>
+          {{range .KYCBundles}}<option value="{{.ID}}">#{{.ID}} · {{.Type}} · {{.Status}}</option>{{end}}
+        </select>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('block-modal')">Cancel</button>
+      <button class="btn-danger">Block user</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="unblock-modal">
+  <div class="modal-head"><h3>Unblock user</h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('unblock-modal')">×</button></div>
+  <form method="post" action="/users/{{.User.ID}}/unblock">
+    <div class="modal-body">
+      <p class="muted" style="font-size:13px;margin-top:0">Quarantined orders will be restored to their previous routes.</p>
+      <div class="field"><label class="label">Reason</label><input name="reason" required></div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('unblock-modal')">Cancel</button>
+      <button>Unblock</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="delete-modal">
+  <div class="modal-head"><h3>Delete user</h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('delete-modal')">×</button></div>
+  <form method="post" action="/users/{{.User.ID}}/delete">
+    <div class="modal-body">
+      <p style="margin-top:0;color:var(--err)"><strong>Irreversible.</strong></p>
+      <ul style="font-size:13px;color:var(--muted);line-height:1.7;margin-top:0">
+        <li>Cancels every order — DIDs return to the pool</li>
+        <li>Deletes SIP peers, KYC bundles, ledger, block log</li>
+        <li>Historical CDRs survive (unlinked) for audit</li>
+      </ul>
+      <div class="field"><label class="label">Type the user id (#{{.User.ID}}) to confirm</label><input name="confirm_id" required></div>
+      <div class="field"><label class="label">Reason</label><input name="reason" required></div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('delete-modal')">Cancel</button>
+      <button class="btn-danger">Delete user permanently</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+function showTab(ev, name){
+  ev.preventDefault();
+  document.querySelectorAll('#user-tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === name));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.dataset.tab === name));
+  history.replaceState(null, '', '#'+name);
+}
+// Honor #hash OR ?tab=name on load so links to /users/N#kyc and form
+// submits that include tab=cdrs both open the right tab.
+(function(){
+  var h = location.hash.replace('#','');
+  if (!h){ h = new URLSearchParams(location.search).get('tab') || ''; }
+  if (h && document.querySelector('#user-tabs a[data-tab="'+h+'"]')){
+    document.querySelectorAll('#user-tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === h));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.dataset.tab === h));
+  }
+})();
+</script>
+{{end}}

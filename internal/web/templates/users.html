@@ -1,0 +1,187 @@
+{{define "content"}}
+<style>
+  /* List-view tabs for Active / Archive — reuses .trace-tabs visual pattern */
+  .view-tabs{display:flex;gap:.2rem;border-bottom:1px solid var(--border);margin-bottom:1rem}
+  .view-tabs a{padding:.55rem 1rem;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;font-size:13px;font-weight:500;cursor:pointer}
+  .view-tabs a:hover{color:var(--text)}
+  .view-tabs a.active{color:var(--accent-text);border-bottom-color:var(--accent)}
+  .view-tabs .count{margin-left:.3em;font-size:11px;color:var(--muted);font-weight:400}
+  .view-tabs a.active .count{color:var(--accent-text)}
+</style>
+
+<div class="actions-bar">
+  <h1 style="margin:0">Users <span class="muted" style="font-size:14px">({{.Total}})</span></h1>
+  <a class="btn" href="/users/new">+ New user</a>
+</div>
+
+<div class="view-tabs">
+  <a href="/users{{if .Pg.Q}}?q={{.Pg.Q}}{{end}}" class="{{if eq .View "active"}}active{{end}}">
+    Active <span class="count">({{.ActiveCount}})</span>
+  </a>
+  <a href="/users?view=archive{{if .Pg.Q}}&q={{.Pg.Q}}{{end}}" class="{{if eq .View "archive"}}active{{end}}">
+    Archive <span class="count">({{.ArchiveCount}})</span>
+  </a>
+</div>
+
+<form class="toolbar-band is-stack" method="get" action="/users">
+  <div class="row">
+    <input class="grow" name="q" value="{{.Pg.Q}}" placeholder="Search every user by external_id, label, or contact email">
+    <select name="reseller_id">
+      <option value="" {{if eq .FilterMode "all"}}selected{{end}}>All resellers</option>
+      <option value="0" {{if eq .FilterMode "direct"}}selected{{end}}>Direct (no reseller)</option>
+      {{range .Resellers}}
+        <option value="{{.ID}}" {{if and (eq $.FilterMode "specific") (eq $.FilterID .ID)}}selected{{end}}>{{.Name}}</option>
+      {{end}}
+    </select>
+    <select name="per_page" title="rows per page">
+      {{range $n := slice 25 50 100 250 1000}}
+        <option value="{{$n}}" {{if eq $.Pg.PerPage $n}}selected{{end}}>{{$n}} per page</option>
+      {{end}}
+    </select>
+    <button>{{icon "search"}}Apply</button>
+    <a class="clear" href="/users">clear filters</a>
+  </div>
+  <div class="row">
+    <input class="grow" id="users-cs-q" type="search" placeholder="Filter visible rows" oninput="dsFilterUsers()">
+    <select id="users-cs-status" onchange="dsFilterUsers()">
+      <option value="">Any status</option>
+      <option value="active">Active</option>
+      <option value="inactive">Inactive</option>
+    </select>
+    <span class="count right-align"><span data-filter-count="users-tbody">{{len .Users}}</span> visible of {{.Total}} total</span>
+  </div>
+</form>
+<script>
+function dsFilterUsers(){
+  clientFilterTable('users-tbody',
+    document.getElementById('users-cs-q').value,
+    {status: document.getElementById('users-cs-status').value});
+}
+</script>
+
+{{if .Users}}
+<table>
+<thead><tr>
+  <th><a class="sort {{if eq .Pg.Sort "id"}}active{{end}}" href="{{.Pg.SortLink "id"}}">ID <span class="arrow">{{.Pg.SortArrow "id"}}</span></a></th>
+  <th><a class="sort {{if eq .Pg.Sort "external_id"}}active{{end}}" href="{{.Pg.SortLink "external_id"}}">External <span class="arrow">{{.Pg.SortArrow "external_id"}}</span></a></th>
+  <th>Reseller</th>
+  <th><a class="sort {{if eq .Pg.Sort "status"}}active{{end}}" href="{{.Pg.SortLink "status"}}">Status <span class="arrow">{{.Pg.SortArrow "status"}}</span></a></th>
+  <th>KYC <span class="muted" style="font-weight:400">A/P/R</span></th>
+  <th class="right"><a class="sort {{if eq .Pg.Sort "balance"}}active{{end}}" href="{{.Pg.SortLink "balance"}}">Balance <span class="arrow">{{.Pg.SortArrow "balance"}}</span></a></th>
+  <th class="right">Total</th>
+  <th class="right">Active</th>
+  <th class="right" title="Last 30 days: NRC + MRC + per-channel + per-minute customer charges">30d rev</th>
+  <th class="right" title="30d revenue − supplier cost">30d profit</th>
+  <th class="right" title="All-time NRC + MRC + per-channel + per-minute customer charges">Lifetime rev</th>
+  <th class="right" title="All-time revenue minus all-time supplier cost">Lifetime profit</th>
+  <th><a class="sort {{if eq .Pg.Sort "created"}}active{{end}}" href="{{.Pg.SortLink "created"}}">Created <span class="arrow">{{.Pg.SortArrow "created"}}</span></a></th>
+  <th>Actions</th>
+</tr></thead>
+<tbody id="users-tbody">
+{{range .Users}}
+<tr data-status="{{.Status}}">
+  <td class="num" style="text-align:left">#{{.ID}}</td>
+  <td>
+    <a class="link" href="/users/{{.ID}}"><code>{{if .ExternalID}}{{.ExternalID}}{{else}}—{{end}}</code></a>
+    {{if or .Label .ContactEmail}}<span class="subtext">· {{if .Label}}{{.Label}}{{else}}{{.ContactEmail}}{{end}}</span>{{end}}
+  </td>
+  <td>{{if .ResellerID}}<a class="link" href="/resellers/{{.ResellerID}}">{{.Reseller}}</a>{{else}}<span class="muted"><em>direct</em></span>{{end}}</td>
+  <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+  <td>
+    <span title="approved" class="pill pill-approved">{{.KycApproved}}</span>
+    <span title="pending"  class="pill pill-pending">{{.KycPending}}</span>
+    <span title="rejected" class="pill pill-rejected">{{.KycRejected}}</span>
+  </td>
+  <td class="num">${{printf "%.2f" .BalanceDollars}}</td>
+  <td class="num">{{.TotalOrders}}</td>
+  <td class="num">{{.ActiveOrders}}</td>
+  <td class="num">{{if gt .Revenue30dDollars 0.0}}${{printf "%.2f" .Revenue30dDollars}}{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="num">{{if .HasProfit30d}}<span style="color:{{if lt .Profit30dDollars 0.0}}var(--err){{else}}var(--ok){{end}}">${{printf "%.2f" .Profit30dDollars}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="num">{{if gt .RevenueLifeDollars 0.0}}${{printf "%.2f" .RevenueLifeDollars}}{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="num">{{if .HasProfitLife}}<span style="color:{{if lt .ProfitLifeDollars 0.0}}var(--err){{else}}var(--ok){{end}}">${{printf "%.2f" .ProfitLifeDollars}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="muted">{{.Created}}</td>
+  <td class="row-actions">
+    <a class="link" href="/users/{{.ID}}">open {{icon "arrow-right"}}</a>
+    {{if eq .Status "active"}}
+    <button class="btn-warn" onclick="openBlockModal({{.ID}}, '{{js (or .ExternalID .Label .ContactEmail)}}')">block</button>
+    {{else if eq .Status "inactive"}}
+    <form method="post" action="/users/{{.ID}}/unblock" style="display:inline" onsubmit="return confirm('Unblock {{or .ExternalID .Label .ID}}?')">
+      <input type="hidden" name="reason" value="quick-unblock from list">
+      <button>unblock</button>
+    </form>
+    {{end}}
+    <button class="btn-danger" onclick="openDeleteModal({{.ID}}, '{{js (or .ExternalID .Label .ContactEmail .ID)}}', {{.ActiveOrders}})">delete</button>
+  </td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{template "pagination" .Pg}}
+{{else}}
+<div class="empty-state">No users{{if .Pg.Q}} match <strong>{{.Pg.Q}}</strong>{{end}}.</div>
+{{end}}
+
+<dialog id="block-row-modal">
+  <div class="modal-head">
+    <h3>Block user <span id="block-row-label" class="muted"></span></h3>
+    <button class="close" type="button" aria-label="Close dialog" onclick="closeModal('block-row-modal')">×</button>
+  </div>
+  <form method="post" id="block-row-form">
+    <div class="modal-body">
+      <p class="muted" style="margin-top:0;font-size:13px">All active orders will be quarantined. Inbound calls reply 480 until unblocked.</p>
+      <div class="field">
+        <label class="label">Reason (compliance log)</label>
+        <textarea name="reason" rows="3" required></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('block-row-modal')">Cancel</button>
+      <button class="btn-danger">Block user</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="delete-row-modal">
+  <div class="modal-head">
+    <h3>Delete user <span id="delete-row-label" class="muted"></span></h3>
+    <button class="close" type="button" aria-label="Close dialog" onclick="closeModal('delete-row-modal')">×</button>
+  </div>
+  <form method="post" id="delete-row-form">
+    <div class="modal-body">
+      <p style="margin-top:0">This is irreversible. We will:</p>
+      <ul style="margin-top:0;font-size:13px;color:var(--muted);line-height:1.8">
+        <li>Cancel <strong id="delete-row-orders">0</strong> active order(s) — DIDs return to the available pool</li>
+        <li>Delete every SIP account, KYC bundle, and document for this user</li>
+        <li>Unlink (but keep) historical CDRs for audit; ledger and block log are deleted with the user</li>
+      </ul>
+      <div class="field">
+        <label class="label">Confirm by typing the user's id (#<span id="delete-row-id"></span>)</label>
+        <input name="confirm_id" required>
+      </div>
+      <div class="field">
+        <label class="label">Reason (recorded in admin audit log if available)</label>
+        <input name="reason" required placeholder="e.g. duplicate / requested deletion">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('delete-row-modal')">Cancel</button>
+      <button class="btn-danger">Delete user permanently</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+function openBlockModal(id, label){
+  document.getElementById('block-row-label').textContent = '· ' + (label || '#'+id);
+  document.getElementById('block-row-form').action = '/users/'+id+'/block';
+  openModal('block-row-modal');
+}
+function openDeleteModal(id, label, orderCount){
+  document.getElementById('delete-row-label').textContent = '· ' + (label || '#'+id);
+  document.getElementById('delete-row-id').textContent = id;
+  document.getElementById('delete-row-orders').textContent = orderCount;
+  document.getElementById('delete-row-form').action = '/users/'+id+'/delete';
+  openModal('delete-row-modal');
+}
+</script>
+{{end}}

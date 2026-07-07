@@ -1,0 +1,59 @@
+{{define "content"}}
+<div class="actions-bar">
+  <h1 style="margin:0">Suppliers <span class="muted" style="font-size:14px;font-weight:500"><span data-filter-count="suppliers-tbody">{{len .Suppliers}}</span></span></h1>
+  <a class="btn" href="/suppliers/new">+ New supplier</a>
+</div>
+
+<form class="toolbar-band is-stack" onsubmit="event.preventDefault()"
+      oninput="clientFilterTable('suppliers-tbody', this.elements.q.value, {status: this.elements.fstatus.value})">
+  <div class="row">
+    <input class="grow" name="q" type="search" placeholder="Filter visible rows by supplier name or IP">
+    <select name="fstatus">
+      <option value="">Any status</option>
+      <option value="active">Active</option>
+      <option value="inactive">Inactive</option>
+    </select>
+    <button type="reset" class="ghost" onclick="setTimeout(function(){document.querySelector('.toolbar-band').dispatchEvent(new Event('input',{bubbles:true}));},0)">Reset</button>
+  </div>
+  <div class="row">
+    <span class="muted" style="font-size:12px">Filters narrow the visible rows on this page. Add suppliers with <a class="link" href="/suppliers/new" style="margin-left:.25rem">+ New supplier</a>.</span>
+  </div>
+</form>
+
+{{if .Suppliers}}
+<table>
+<thead><tr>
+  <th>Name</th>
+  <th>Status</th>
+  <th>IP groups</th>
+  <th>Authorized IPs</th>
+  <th class="right">Rate cards</th>
+  <th class="right">DIDs</th>
+  <th class="right" title="Last 30 days: customer charges (NRC+MRC+channel+minutes) on orders through this supplier's DIDs">30d rev</th>
+  <th class="right" title="30d revenue minus what we owe this supplier (CDR snapshot + supplier MRC and NRC from rate cards)">30d profit</th>
+  <th class="right" title="All-time customer charges on this supplier's DIDs">Lifetime rev</th>
+  <th class="right" title="All-time revenue minus what we owe this supplier">Lifetime profit</th>
+  <th></th>
+</tr></thead>
+<tbody id="suppliers-tbody">
+{{range .Suppliers}}
+<tr data-status="{{.Status}}">
+  <td><a class="link" href="/suppliers/{{.ID}}"><strong>{{.Name}}</strong></a></td>
+  <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+  <td>{{.GroupCount}}</td>
+  <td><code>{{.IPList}}</code></td>
+  <td class="num">{{.RateCount}}</td>
+  <td class="num">{{.DIDCount}}</td>
+  <td class="num">{{if gt .Revenue30dDollars 0.0}}${{printf "%.2f" .Revenue30dDollars}}{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="num">{{if .HasProfit30d}}<span style="color:{{if lt .Profit30dDollars 0.0}}var(--err){{else}}var(--ok){{end}}">${{printf "%.2f" .Profit30dDollars}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="num">{{if gt .RevenueLifeDollars 0.0}}${{printf "%.2f" .RevenueLifeDollars}}{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="num">{{if .HasProfitLife}}<span style="color:{{if lt .ProfitLifeDollars 0.0}}var(--err){{else}}var(--ok){{end}}">${{printf "%.2f" .ProfitLifeDollars}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="right"><a class="link" href="/suppliers/{{.ID}}">{{icon "edit"}}edit</a></td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<div class="empty-state">No suppliers yet. Start with <a href="/suppliers/new">+ New supplier</a>.</div>
+{{end}}
+{{end}}

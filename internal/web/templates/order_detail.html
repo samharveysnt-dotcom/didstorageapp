@@ -1,0 +1,580 @@
+{{define "content"}}
+<style>
+  .tabs{display:flex;flex-wrap:wrap;gap:.2rem;border-bottom:1px solid var(--border);margin-bottom:1.2rem}
+  .tabs a{padding:.55rem 1rem;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;font-size:13px;font-weight:500;cursor:pointer;user-select:none}
+  .tabs a:hover{color:var(--text)}
+  .tabs a.active{color:var(--accent-text);border-bottom-color:var(--accent)}
+  .tab-pane{display:none}
+  .tab-pane.active{display:block}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:.3rem .8rem;font-size:13px}
+  .kv .k{color:var(--muted);font-weight:500}
+  .kv .v{color:var(--text)}
+</style>
+
+<div class="actions-bar">
+  <h1 style="margin:0">
+    Order #{{.Order.ID}} · <code>{{.Order.E164}}</code>
+    <span class="pill pill-{{.Order.Status}}" style="margin-left:.5rem">{{.Order.Status}}</span>
+  </h1>
+  <div class="row-actions">
+    <a class="link" href="/users/{{.Order.UserID}}#orders">{{icon "arrow-left"}}back to user</a>
+    <a class="link" href="/orders">all orders</a>
+  </div>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="label">DID</div>
+    <div class="value" style="font-size:1.05rem"><code>{{.Order.E164}}</code></div>
+    <div class="sub">{{didtype .Order.Type}} · {{.Order.Country}} · supplier <a class="link" href="/suppliers/{{.Order.SupplierID}}">{{.Order.Supplier}}</a></div>
+  </div>
+  <div class="card">
+    <div class="label">Customer</div>
+    <div class="value" style="font-size:1.05rem">
+      <a class="link" href="/users/{{.Order.UserID}}">{{if .Order.UserRef}}{{.Order.UserRef}}{{else}}#{{.Order.UserID}}{{end}}</a>
+    </div>
+    <div class="sub">
+      <span class="pill pill-{{.Order.UserStatus}}">{{.Order.UserStatus}}</span>
+      {{if .Order.ResellerID}} · <a class="link" href="/resellers/{{.Order.ResellerID}}">{{.Order.ResellerName}}</a>{{end}}
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">Lifetime revenue</div>
+    <div class="value" style="font-variant-numeric:tabular-nums">${{printf "%.2f" .RevenueLifeDollars}}</div>
+    <div class="sub">profit ${{printf "%.2f" .ProfitLifeDollars}} · 30d ${{printf "%.2f" .Revenue30dDollars}} / ${{printf "%.2f" .Profit30dDollars}}</div>
+  </div>
+  <div class="card">
+    <div class="label">Channels &amp; route</div>
+    <div class="value" style="font-size:1rem">{{.Order.ChannelCount}} · {{siptarget .Order.RouteKind .Order.RouteTarget}}</div>
+    <div class="sub">anniversary day {{.Order.AnniversaryDay}} · next billing {{.Order.NextBillingAt}}</div>
+  </div>
+</div>
+
+<div class="tabs" id="ord-tabs">
+  <a data-tab="overview" class="active" onclick="showOrdTab(event,'overview')">Overview</a>
+  <a data-tab="route"      onclick="showOrdTab(event,'route')">Route</a>
+  <a data-tab="cdrs"       onclick="showOrdTab(event,'cdrs')">CDRs <span class="muted">({{len .CDRs}})</span></a>
+  <a data-tab="kyc"        onclick="showOrdTab(event,'kyc')">KYC <span class="muted">({{len .KYCBundles}})</span></a>
+  <a data-tab="ledger"     onclick="showOrdTab(event,'ledger')">Ledger <span class="muted">({{len .Ledger}})</span></a>
+  <a data-tab="compliance" onclick="showOrdTab(event,'compliance')">Compliance Log <span class="muted">({{len .Compliance}})</span></a>
+</div>
+
+<!-- ============================================================ Overview -->
+<div class="tab-pane active" data-tab="overview">
+  <div class="section">
+    <h2>Order details</h2>
+    <div class="kv">
+      <div class="k">Order id</div><div class="v">#{{.Order.ID}}</div>
+      <div class="k">Assigned at</div><div class="v">{{.Order.AssignedAt}}</div>
+      {{if .Order.EndedAt}}<div class="k">Ended at</div><div class="v">{{.Order.EndedAt}}</div>{{end}}
+      <div class="k">Route</div><div class="v">{{siptarget .Order.RouteKind .Order.RouteTarget}}</div>
+      <div class="k">Channels</div><div class="v">{{.Order.ChannelCount}}</div>
+      <div class="k">Anniversary</div><div class="v">day {{.Order.AnniversaryDay}} of month</div>
+      <div class="k">KYC bundle</div><div class="v">{{if .Order.KycBundleID}}<a class="link" href="/kyc-bundles/{{.Order.KycBundleID}}">#{{.Order.KycBundleID}}</a> <span class="pill pill-{{.Order.KycBundleStatus}}">{{.Order.KycBundleStatus}}</span>{{else}}<span class="muted">— none —</span>{{end}}</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Rate-card snapshot</h2>
+    <table>
+      <thead><tr>
+        <th>Item</th>
+        <th class="right">Customer billed</th>
+        <th class="right">Supplier cost</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>NRC (one-time)</td>
+            <td class="num">${{printf "%.2f" .Order.NRCDollars}}</td>
+            <td class="num">${{printf "%.2f" .Order.SupNRCDollars}}</td></tr>
+        <tr><td>MRC (per month)</td>
+            <td class="num">${{printf "%.2f" .Order.MRCDollars}}</td>
+            <td class="num">${{printf "%.2f" .Order.SupMRCDollars}}</td></tr>
+        <tr><td>Per channel / month</td>
+            <td class="num">${{printf "%.2f" .Order.ChannelMonthlyDollars}}</td>
+            <td class="right"><span class="muted">— n/a —</span></td></tr>
+        <tr><td>Per minute</td>
+            <td class="num">{{printf "%.4f¢" .Order.PerMinuteCents}} <span class="muted">({{.Order.BillMinSeconds}}/{{.Order.BillIncrementSeconds}})</span></td>
+            <td class="num">{{printf "%.4f¢" .Order.SupPerMinuteCents}} <span class="muted">({{.Order.SupBillMinSeconds}}/{{.Order.SupBillIncrementSeconds}})</span></td></tr>
+      </tbody>
+    </table>
+    <p class="muted" style="font-size:11.5px;margin-top:.6rem">
+      Supplier per-minute cost is snapshotted on each CDR; supplier MRC/NRC come from the rate card live, so card edits retroactively shift historical recurring-charge profit.
+    </p>
+  </div>
+</div>
+
+<!-- ============================================================ Route -->
+<div class="tab-pane" data-tab="route">
+  <style>
+    /* Horizontal call-flow visualization. Each "node" is a small card and
+     * the arrows between them say which Asterisk component bridges the leg. */
+    .flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:.5rem;margin:.4rem 0 1.2rem}
+    .flow .node{flex:0 1 auto;min-width:140px;max-width:240px;background:#1e1f22;border:1px solid var(--border);border-radius:8px;padding:.65rem .8rem;display:flex;flex-direction:column;gap:.15rem}
+    .flow .node.caller   {border-color:rgba(148,155,164,.45)}
+    .flow .node.supplier {border-color:rgba(240,178,50,.45)}
+    .flow .node.platform {border-color:rgba(88,101,242,.45)}
+    .flow .node.target   {border-color:rgba(35,165,90,.45)}
+    .flow .node .lbl{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:600}
+    .flow .node .val{color:var(--text);font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all}
+    .flow .node .sub{color:var(--muted);font-size:11px;margin-top:.15rem}
+    .flow .arrow{display:flex;align-items:center;color:var(--muted);font-size:18px;line-height:1;padding:0 .2rem;flex-shrink:0}
+    .flow .arrow .arrow-label{display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.1em;margin-top:.25rem;text-align:center;color:var(--muted);opacity:.8}
+    .flow .arrow .arrow-wrap{display:flex;flex-direction:column;align-items:center;gap:.05rem}
+
+    .dial-string{background:#1e1f22;border:1px solid var(--border);border-radius:6px;padding:.6rem .8rem;font:12px ui-monospace,Menlo,monospace;color:var(--text);overflow-x:auto}
+    .dial-string .lbl{display:block;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin-bottom:.2rem;font-family:ui-sans-serif}
+  </style>
+
+  <div class="section">
+    <h2>Call flow</h2>
+    <div class="flow">
+      <div class="node caller">
+        <span class="lbl">Caller</span>
+        <span class="val">PSTN / external</span>
+        <span class="sub">whoever dials the DID</span>
+      </div>
+      <div class="arrow"><div class="arrow-wrap">→<span class="arrow-label">SIP INVITE</span></div></div>
+
+      <div class="node supplier">
+        <span class="lbl">Supplier</span>
+        <span class="val">{{.Order.Supplier}}</span>
+        <span class="sub"><a class="link" href="/suppliers/{{.Order.SupplierID}}">view IPs</a></span>
+      </div>
+      <div class="arrow"><div class="arrow-wrap">→<span class="arrow-label">/sipctl/authorize</span></div></div>
+
+      <div class="node platform">
+        <span class="lbl">DID</span>
+        <span class="val">{{.Order.E164}}</span>
+        <span class="sub">{{didtype .Order.Type}} · {{.Order.Country}} · ch&nbsp;{{.Order.ChannelCount}}</span>
+      </div>
+      <div class="arrow"><div class="arrow-wrap">→<span class="arrow-label">Asterisk Dial()</span></div></div>
+
+      <div class="node target">
+        <span class="lbl">Route target</span>
+        <span class="val">{{.Order.RouteTarget}}</span>
+        <span class="sub">{{.Order.RouteKind}}</span>
+      </div>
+    </div>
+
+    <div class="dial-string">
+      <span class="lbl">Resolved Asterisk dial string</span>
+      {{if eq .Order.RouteKind "sip_uri"}}PJSIP/outbound/{{.Order.RouteTarget}}
+      {{else if eq .Order.RouteKind "ip"}}PJSIP/outbound/sip:{{.Order.E164}}@{{.Order.RouteTarget}}
+      {{else if eq .Order.RouteKind "sip_account"}}PJSIP/{{.Order.RouteTarget}}
+      {{end}}
+    </div>
+    <p class="muted" style="font-size:11.5px;margin-top:.6rem;line-height:1.5">
+      This is the literal <code>Dial()</code> argument the from-supplier dialplan uses. <code>sip_uri</code> + <code>ip</code> both go via the <code>[outbound]</code> PJSIP relay endpoint; <code>sip_account</code> dials a registered in-system peer directly.
+    </p>
+  </div>
+
+  <div class="section">
+    <h2>Edit route</h2>
+    {{if or (eq .Order.Status "active") (eq .Order.Status "kyc_pending") (eq .Order.Status "quarantined")}}
+    <form method="post" action="/orders/{{.Order.ID}}/update" onsubmit="return validateOrderRoute()">
+      <input type="hidden" name="return_to" value="/orders/{{.Order.ID}}#route">
+      {{/* preserve the order's KYC link so a route-only save doesn't clobber it */}}
+      <input type="hidden" name="kyc_bundle_id" value="{{if .Order.KycBundleID}}{{.Order.KycBundleID}}{{end}}">
+      <div class="hstack">
+        <div class="field" style="min-width:180px">
+          <label class="label">Route kind</label>
+          <select name="route_kind" id="rt-kind" required onchange="rtSyncTargetUI()">
+            <option value="sip_uri"     {{if eq .Order.RouteKind "sip_uri"}}selected{{end}}>sip_uri</option>
+            <option value="ip"          {{if eq .Order.RouteKind "ip"}}selected{{end}}>ip</option>
+            <option value="sip_account" {{if eq .Order.RouteKind "sip_account"}}selected{{end}}>sip_account (in-system peer)</option>
+            <option value="audio"       {{if eq .Order.RouteKind "audio"}}selected{{end}}>audio_clip</option>
+            <option value="audio_group" {{if eq .Order.RouteKind "audio_group"}}selected{{end}}>audio_group</option>
+          </select>
+        </div>
+        <div class="field grow">
+          <label class="label">Route target</label>
+          <input name="route_target" id="rt-target-text" value="{{if and (ne .Order.RouteKind "sip_account") (ne .Order.RouteKind "audio") (ne .Order.RouteKind "audio_group")}}{{.Order.RouteTarget}}{{end}}"
+                 placeholder="sip:904@example.com  |  1.2.3.4:5060">
+          <select name="route_target" id="rt-target-select" disabled style="display:none">
+            <option value="">— pick a peer —</option>
+            {{range .Peers}}<option value="{{.Username}}" {{if eq .Username $.Order.RouteTarget}}selected{{end}}>{{.Username}}@{{.Realm}}</option>{{end}}
+          </select>
+          <select name="audio_file_id" id="rt-audio-select" disabled style="display:none">
+            <option value="">— loading clips… —</option>
+          </select>
+          <select name="audio_group_id" id="rt-audiogroup-select" disabled style="display:none">
+            <option value="">— loading groups… —</option>
+          </select>
+          <span id="rt-target-hint" class="muted" style="font-size:11.5px;margin-top:.3rem;display:block">sip:user@host[:port] — anything the [outbound] endpoint can dial</span>
+        </div>
+      </div>
+      <div class="hstack">
+        <div class="field" style="min-width:180px">
+          <label class="label">Channels (0–8192)</label>
+          <input name="channel_count" id="rt-channels" type="number" min="0" max="8192" value="{{.Order.ChannelCount}}" required>
+          <span class="muted" style="font-size:11.5px;margin-top:.3rem">concurrent-call cap (0 = pause all calls)</span>
+        </div>
+        <div class="field" style="min-width:180px">
+          <label class="label">Anniversary day (1–28)</label>
+          <input name="anniversary_day" type="number" min="1" max="28" value="{{.Order.AnniversaryDay}}" required>
+          <span class="muted" style="font-size:11.5px;margin-top:.3rem">day of month MRC + channel fee billed</span>
+        </div>
+      </div>
+      <p id="rt-err" class="error" style="text-align:left;margin-top:.5rem;display:none"></p>
+      <div class="row-actions" style="justify-content:flex-end;margin-top:.4rem">
+        <button>{{icon "check"}}Save route</button>
+      </div>
+    </form>
+    {{else}}
+    <p class="muted">Order is <code>{{.Order.Status}}</code>; the route can't be edited. Reinstate the order (or create a new one) to change routing.</p>
+    {{end}}
+  </div>
+
+  <div class="section">
+    <h2>Available peers <span class="muted" style="text-transform:none;letter-spacing:0;font-size:12px;font-weight:400">· customer's registered SIP endpoints</span></h2>
+    {{if .Peers}}
+    <table>
+      <thead><tr><th>Username</th><th>Realm</th><th>Created</th><th>Used by this order?</th></tr></thead>
+      <tbody>
+      {{range .Peers}}
+        <tr>
+          <td><code>{{.Username}}</code></td>
+          <td class="muted">{{.Realm}}</td>
+          <td class="muted">{{.Created}}</td>
+          <td>{{if .IsRouteTarget}}<span class="pill pill-active">current route target</span>{{else}}<span class="muted">—</span>{{end}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="muted" style="margin:0">No SIP peers registered on this customer. Add one from <a class="link" href="/users/{{.Order.UserID}}#peers">user · Peers</a> if you want <code>sip_account</code> routing.</p>
+    {{end}}
+  </div>
+
+  <script>
+  // Lazy-fetch the audio + audio-group dropdown options the first time
+  // one of those route kinds is selected — same pattern as the DID
+  // reserve modal. Cached for the page lifetime.
+  var __rtAudioLoaded = false;
+  var __rtGroupLoaded = false;
+  // Pre-select hints from the server-rendered values.
+  var __rtCurrentAudioBasename = {{if eq .Order.RouteKind "audio"}}{{js .Order.RouteTarget}}{{else}}""{{end}};
+  var __rtCurrentAudioGroupID  = {{if and (eq .Order.RouteKind "audio_group") .Order.AudioGroupID}}{{.Order.AudioGroupID}}{{else}}0{{end}};
+
+  function rtLoadAudio(){
+    if (__rtAudioLoaded) return Promise.resolve();
+    return fetch('/audio-files/options.json').then(function(r){return r.json();}).then(function(list){
+      var sel = document.getElementById('rt-audio-select');
+      sel.innerHTML = '';
+      if (!list.length){
+        var o = document.createElement('option');
+        o.value = ''; o.textContent = '— no clips uploaded —';
+        sel.appendChild(o);
+      } else {
+        list.forEach(function(it){
+          var o = document.createElement('option');
+          o.value = it.id;
+          o.textContent = it.name + ' (' + it.duration + ')';
+          // Match by on-disk basename embedded in current route_target,
+          // which has the shape "didstorage/<basename>".
+          if (__rtCurrentAudioBasename && __rtCurrentAudioBasename.indexOf('/' + (it.filename||'')) >= 0){
+            o.selected = true;
+          }
+          sel.appendChild(o);
+        });
+      }
+      __rtAudioLoaded = true;
+    });
+  }
+  function rtLoadGroups(){
+    if (__rtGroupLoaded) return Promise.resolve();
+    return fetch('/audio-groups/options.json').then(function(r){return r.json();}).then(function(list){
+      var sel = document.getElementById('rt-audiogroup-select');
+      sel.innerHTML = '';
+      var usable = list.filter(function(g){ return g.member_count > 0; });
+      if (!usable.length){
+        var o = document.createElement('option');
+        o.value = ''; o.textContent = '— no non-empty groups —';
+        sel.appendChild(o);
+      } else {
+        usable.forEach(function(g){
+          var o = document.createElement('option');
+          o.value = g.id;
+          o.textContent = g.name + ' (' + g.member_count + ' clip' + (g.member_count === 1 ? '' : 's') + ')';
+          if (g.id === __rtCurrentAudioGroupID) o.selected = true;
+          sel.appendChild(o);
+        });
+      }
+      __rtGroupLoaded = true;
+    });
+  }
+
+  function rtSyncTargetUI(){
+    var kind = document.getElementById('rt-kind').value;
+    var t = document.getElementById('rt-target-text');
+    var s = document.getElementById('rt-target-select');
+    var a = document.getElementById('rt-audio-select');
+    var g = document.getElementById('rt-audiogroup-select');
+    var h = document.getElementById('rt-target-hint');
+    function hideAll(){
+      t.disabled = true;  t.style.display = 'none';
+      s.disabled = true;  s.style.display = 'none';
+      a.disabled = true;  a.style.display = 'none';
+      g.disabled = true;  g.style.display = 'none';
+    }
+    if (kind === 'sip_account'){
+      hideAll();
+      s.disabled = false; s.style.display = '';
+      h.innerHTML = 'username of a peer on this customer (dropdown above)';
+    } else if (kind === 'ip'){
+      hideAll();
+      t.disabled = false; t.style.display = '';
+      h.innerHTML = 'bare ip or ip:port — dialled number stays the DID';
+    } else if (kind === 'audio'){
+      hideAll();
+      a.disabled = false; a.style.display = '';
+      h.innerHTML = 'one clip is played on every call to this DID, then the line drops';
+      rtLoadAudio();
+    } else if (kind === 'audio_group'){
+      hideAll();
+      g.disabled = false; g.style.display = '';
+      h.innerHTML = 'each call plays a different clip from the group (random, no immediate repeats)';
+      rtLoadGroups();
+    } else {
+      hideAll();
+      t.disabled = false; t.style.display = '';
+      h.innerHTML = 'sip:user@host[:port] — anything the [outbound] endpoint can dial';
+    }
+  }
+  function validateOrderRoute(){
+    var err = document.getElementById('rt-err'); err.style.display = 'none';
+    var fail = function(m){ err.textContent = m; err.style.display = 'block'; return false; };
+    var k = document.getElementById('rt-kind').value;
+    var ch = parseInt(document.getElementById('rt-channels').value, 10);
+    if (isNaN(ch) || ch < 0 || ch > 8192) return fail('channels must be 0–8192');
+    if (k === 'audio'){
+      if (!document.getElementById('rt-audio-select').value) return fail('pick an audio clip');
+      return true;
+    }
+    if (k === 'audio_group'){
+      if (!document.getElementById('rt-audiogroup-select').value) return fail('pick a non-empty audio group');
+      return true;
+    }
+    var t = (k === 'sip_account' ? document.getElementById('rt-target-select').value
+                                 : document.getElementById('rt-target-text').value).trim();
+    if (!t) return fail(k === 'sip_account' ? 'pick a peer — or create one on the user page first' : 'route target is required');
+    if (k === 'sip_uri'   && !/^(sip:|sips:)/i.test(t) && !/.+@.+/.test(t)) return fail('sip_uri must look like sip:user@host or user@host');
+    if (k === 'ip'        && !/^[\d.]+(?::\d+)?$/.test(t)) return fail('ip target must be ip[:port]');
+    if (k === 'sip_account' && !/^[a-zA-Z0-9_\-]{1,32}$/.test(t)) return fail('sip_account must be 1–32 chars [a-zA-Z0-9_-]');
+    return true;
+  }
+  rtSyncTargetUI();
+  </script>
+</div>
+
+<!-- ============================================================ CDRs -->
+<div class="tab-pane" data-tab="cdrs">
+  <div class="actions-bar">
+    <h2 style="margin:0">CDRs <span class="muted" style="font-size:13px">(last 100 for this order)</span></h2>
+    <div class="row-actions">
+      <a class="btn ghost" href="/orders/{{.Order.ID}}/export/cdrs.csv">{{icon "download"}}CSV</a>
+      <a class="link" href="/cdrs?order_id={{.Order.ID}}">{{icon "external"}}open in /cdrs</a>
+    </div>
+  </div>
+  {{if .CDRs}}
+  <table>
+    <thead><tr>
+      <th>Started</th><th>State</th><th>From</th><th>To (route)</th>
+      <th class="right">Dur</th><th class="right">Min</th><th class="right">Charge</th><th class="right">Sup. cost</th><th>Cause</th><th></th>
+    </tr></thead>
+    <tbody>
+    {{range .CDRs}}
+      <tr>
+        <td>{{.Started}}</td>
+        <td>
+          {{if eq .State "answered"}}<span class="pill pill-active">answered</span>{{else}}<span class="pill pill-suspended">failed</span>{{end}}
+          {{if eq .AdminAction "live_hangup"}}<span class="pill pill-suspended tip" data-tip="Admin force-hangup · {{.AdminActionReason}}" style="margin-left:.3rem">{{icon "x"}}hangup</span>
+          {{else if eq .AdminAction "live_warn"}}<span class="pill pill-warn tip" data-tip="Admin warned then ended · {{.AdminActionReason}}" style="margin-left:.3rem">{{icon "warning"}}warned</span>
+          {{else if eq .AdminAction "live_redirect"}}<span class="pill pill-available tip" data-tip="Admin re-bridged the call · {{.AdminActionReason}}" style="margin-left:.3rem">{{icon "arrow-right"}}redirected</span>
+          {{end}}
+        </td>
+        <td>{{sipcaller .SrcURI}}</td>
+        <td class="muted">{{siptarget .RoutedKind .RoutedTarget}}</td>
+        <td class="num">{{compactDuration .Billsec}}</td>
+        <td class="num">{{.ChargedMinutes}}</td>
+        <td class="num">${{printf "%.2f" .ChargeDollars}}</td>
+        <td class="num">${{printf "%.2f" .SupplierChargeDollars}}</td>
+        <td>{{hangupcause .HangupCause}}</td>
+        <td class="right"><a class="link" href="/cdrs/{{.CallID}}/sip-trace">{{icon "external"}}trace</a></td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">No CDRs for this order yet.</p>
+  {{end}}
+</div>
+
+<!-- ============================================================ KYC -->
+<div class="tab-pane" data-tab="kyc">
+  {{/* Find the attached bundle (if any) and segregate the others — the
+       attached one gets a focused card; the rest are options in the
+       swap-selector below. */}}
+  <div class="section">
+    <h2>Attached bundle</h2>
+    {{$attached := false}}
+    {{range .KYCBundles}}{{if .IsAttached}}{{$attached = .}}{{end}}{{end}}
+    {{if $attached}}
+      <div class="cards" style="margin-bottom:0">
+        <div class="card">
+          <div class="label">Bundle</div>
+          <div class="value" style="font-size:1.05rem">#{{$attached.ID}}</div>
+          <div class="sub">{{$attached.Type}} · <span class="pill pill-{{$attached.Status}}">{{$attached.Status}}</span></div>
+        </div>
+        <div class="card">
+          <div class="label">Documents</div>
+          <div class="value" style="font-variant-numeric:tabular-nums">{{$attached.DocCount}}</div>
+          <div class="sub">files uploaded</div>
+        </div>
+        <div class="card">
+          <div class="label">Created</div>
+          <div class="value" style="font-size:1rem">{{$attached.Created}}</div>
+          <div class="sub">{{if $attached.Approved}}approved {{$attached.Approved}}{{else}}<span class="muted">not yet approved</span>{{end}}</div>
+        </div>
+        <div class="card">
+          <div class="label">Open</div>
+          <div class="value" style="font-size:1rem"><a class="link" href="/kyc-bundles/{{$attached.ID}}">full bundle {{icon "arrow-right"}}</a></div>
+          <div class="sub">view documents + approval state</div>
+        </div>
+      </div>
+    {{else}}
+      <p class="muted" style="margin:0">No KYC bundle is linked to this order. The order will sit in <code>kyc_pending</code> until one is attached and approved.</p>
+    {{end}}
+  </div>
+
+  {{/* Swap selector: build a list of OTHER bundles on the same customer
+       (excluding the currently-attached one) so the dropdown's options are
+       the meaningful alternatives, not duplicates of what's already linked. */}}
+  <div class="section">
+    <h2>Change linked bundle <span class="muted" style="text-transform:none;letter-spacing:0;font-size:12px;font-weight:400">· from this customer's KYC selection</span></h2>
+    {{if or (eq .Order.Status "active") (eq .Order.Status "kyc_pending") (eq .Order.Status "quarantined")}}
+    {{$others := false}}
+    {{range .KYCBundles}}{{if not .IsAttached}}{{$others = true}}{{end}}{{end}}
+    {{if or $others $attached}}
+    <form method="post" action="/orders/{{.Order.ID}}/update" onsubmit="return validateKycSwap()">
+      <input type="hidden" name="return_to" value="/orders/{{.Order.ID}}#kyc">
+      {{/* preserve route fields so a kyc-only save doesn't clobber routing */}}
+      <input type="hidden" name="route_kind"      value="{{.Order.RouteKind}}">
+      <input type="hidden" name="route_target"    value="{{.Order.RouteTarget}}">
+      <input type="hidden" name="channel_count"   value="{{.Order.ChannelCount}}">
+      <input type="hidden" name="anniversary_day" value="{{.Order.AnniversaryDay}}">
+
+      <div class="field">
+        <label class="label">Bundle to attach</label>
+        <select name="kyc_bundle_id" id="kyc-select">
+          {{if $attached}}<option value="{{$attached.ID}}" selected>currently attached — #{{$attached.ID}} · {{$attached.Type}} · {{$attached.Status}}</option>{{end}}
+          {{range .KYCBundles}}{{if not .IsAttached}}<option value="{{.ID}}">#{{.ID}} · {{.Type}} · {{.Status}} · {{.DocCount}} doc(s)</option>{{end}}{{end}}
+        </select>
+        <span class="muted" style="font-size:11.5px;margin-top:.3rem">Only bundles owned by this customer are listed — server-side validation enforces ownership.</span>
+      </div>
+
+      <div class="field">
+        <label style="font-size:12px;color:var(--text-soft);display:flex;align-items:center;gap:.5rem;cursor:pointer">
+          <input type="checkbox" name="kyc_bundle_clear" value="1" id="kyc-clear" style="width:auto;min-height:auto;margin:0"
+                 onchange="document.getElementById('kyc-select').disabled=this.checked">
+          Detach the bundle entirely — order goes back to <code>kyc_pending</code>
+        </label>
+      </div>
+
+      <p id="kyc-err" class="error" style="text-align:left;display:none;margin-top:.5rem"></p>
+      <div class="row-actions" style="justify-content:flex-end;margin-top:.4rem">
+        <a class="btn ghost" href="/users/{{.Order.UserID}}#kyc">{{icon "plus"}}New bundle for this customer</a>
+        <button>{{icon "check"}}Save KYC link</button>
+      </div>
+    </form>
+    {{else}}
+    <p class="muted" style="margin:0">This customer has no KYC bundles at all — create one from <a class="link" href="/users/{{.Order.UserID}}#kyc">user · KYC</a>, then come back here to link it.</p>
+    {{end}}
+    {{else}}
+    <p class="muted">Order is <code>{{.Order.Status}}</code>; the KYC link can't be edited.</p>
+    {{end}}
+  </div>
+
+  <script>
+  function validateKycSwap(){
+    var err = document.getElementById('kyc-err'); err.style.display = 'none';
+    var clear = document.getElementById('kyc-clear').checked;
+    if (clear) return true;
+    var v = document.getElementById('kyc-select').value;
+    if (!v){ err.textContent = 'pick a bundle or tick the detach box'; err.style.display='block'; return false; }
+    return true;
+  }
+  </script>
+</div>
+
+<!-- ============================================================ Ledger -->
+<div class="tab-pane" data-tab="ledger">
+  <h2>Ledger entries referencing this order</h2>
+  <p class="muted" style="font-size:12px;margin-top:0">Includes the order's NRC, every per-call charge on this order's CDRs, and every MRC/channel billing run for this order.</p>
+  {{if .Ledger}}
+  <table>
+    <thead><tr><th>When</th><th>Kind</th><th class="right">Δ ($)</th><th class="right">Balance after</th></tr></thead>
+    <tbody>
+    {{range .Ledger}}
+      <tr>
+        <td class="muted">{{.Created}}</td>
+        <td>{{.Kind}}</td>
+        <td class="num">{{if lt .Delta 0}}<span style="color:var(--err)">−${{printf "%.2f" (absdollars .Delta)}}</span>{{else}}<span style="color:var(--ok)">+${{printf "%.2f" (dollars .Delta)}}</span>{{end}}</td>
+        <td class="num">${{printf "%.2f" (dollars .BalanceAfter)}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">No ledger entries reference this order yet.</p>
+  {{end}}
+</div>
+
+<!-- ============================================================ Compliance -->
+<div class="tab-pane" data-tab="compliance">
+  <h2>Compliance log</h2>
+  <p class="muted" style="font-size:12px;margin-top:0">Order-scoped events (live-call admin actions for this order) and user-wide events (block / unblock affecting the customer behind this order).</p>
+  {{if .Compliance}}
+  <table>
+    <thead><tr><th>When</th><th>Action</th><th>Scope</th><th>Reason</th><th>Details</th><th>Admin</th></tr></thead>
+    <tbody>
+    {{range .Compliance}}
+      <tr>
+        <td class="muted">{{.Created}}</td>
+        <td>
+          {{if eq .Action "block"}}<span class="pill pill-suspended">block</span>
+          {{else if eq .Action "unblock"}}<span class="pill pill-active">unblock</span>
+          {{else if eq .Action "live_hangup"}}<span class="pill pill-warn">live hangup</span>
+          {{else if eq .Action "live_warn"}}<span class="pill pill-warn">live warn</span>
+          {{else if eq .Action "live_redirect"}}<span class="pill pill-warn">live redirect</span>
+          {{else}}<span class="pill">{{.Action}}</span>{{end}}
+        </td>
+        <td><span class="pill pill-{{if eq .Scope "order"}}available{{else}}inactive{{end}}">{{.Scope}}</span></td>
+        <td>{{.Reason}}</td>
+        <td class="muted" style="font-family:ui-monospace,Menlo,monospace;font-size:11.5px">{{.Details}}</td>
+        <td class="muted">{{if .ByEmail}}{{.ByEmail}}{{else}}<em>system</em>{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">No compliance events recorded for this order yet.</p>
+  {{end}}
+</div>
+
+<script>
+function showOrdTab(ev, name){
+  ev.preventDefault();
+  document.querySelectorAll('#ord-tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === name));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.dataset.tab === name));
+  history.replaceState(null, '', '#'+name);
+}
+(function(){
+  var h = location.hash.replace('#','');
+  if (h && document.querySelector('#ord-tabs a[data-tab="'+h+'"]')){
+    document.querySelectorAll('#ord-tabs a').forEach(a => a.classList.toggle('active', a.dataset.tab === h));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.dataset.tab === h));
+  }
+})();
+</script>
+{{end}}

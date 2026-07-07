@@ -1,0 +1,111 @@
+{{define "content"}}
+<div class="actions-bar">
+  <h1 style="margin:0">Hangup causes <span class="muted" style="font-size:14px">({{.TotalAll}})</span></h1>
+  <button onclick="openCauseModal({code:'', label:'', detail:'', family:'platform', builtin:false})">{{icon "plus"}}New cause</button>
+</div>
+
+<form method="get" action="/cause-codes" class="toolbar-band">
+  <input class="grow" name="q" value="{{.FilterQ}}" placeholder="search code / label / detail">
+  <select name="family" onchange="this.form.submit()">
+    <option value=""         {{if eq .FilterFamily ""}}selected{{end}}>— any family —</option>
+    <option value="platform" {{if eq .FilterFamily "platform"}}selected{{end}}>platform</option>
+    <option value="sip"      {{if eq .FilterFamily "sip"}}selected{{end}}>SIP</option>
+  </select>
+  <button>{{icon "search"}}Apply</button>
+  {{if or .FilterQ .FilterFamily}}<a class="link" href="/cause-codes">clear</a>{{end}}
+</form>
+
+<p class="muted" style="font-size:12.5px;margin-top:0">
+  {{icon "info"}}
+  These labels and tooltips drive every CDR-list cause cell and the SIP-trace end-result pill.
+  Built-in causes (locked badge) can be re-worded but not deleted — the platform still emits the same code values.
+</p>
+
+{{if .Causes}}
+<table>
+<thead><tr>
+  <th>Code</th><th>Label</th><th>Family</th><th>Detail</th><th>Built-in</th><th>Actions</th>
+</tr></thead>
+<tbody>
+{{range .Causes}}
+<tr>
+  <td><code>{{.Code}}</code></td>
+  <td>{{.Label}}</td>
+  <td><span class="pill {{if eq .Family "platform"}}pill-warn{{else}}pill-available{{end}}">{{if eq .Family "sip"}}SIP{{else}}{{.Family}}{{end}}</span></td>
+  <td class="muted" style="white-space:normal;overflow:visible;text-overflow:clip;max-width:520px"><span class="tip" data-tip="{{.Detail}}">{{.Detail}}</span></td>
+  <td>{{if .Builtin}}<span class="pill pill-cancelled">locked</span>{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="row-actions">
+    <button onclick='openCauseModal({code:{{js .Code | printf "%q"}}, label:{{js .Label | printf "%q"}}, detail:{{js .Detail | printf "%q"}}, family:{{js .Family | printf "%q"}}, builtin:{{.Builtin}}})'>{{icon "edit"}}edit</button>
+    {{if not .Builtin}}
+    <form method="post" action="/cause-codes/{{.Code}}/delete" style="display:inline" onsubmit="return confirm('Delete cause {{.Code}}? CDRs that already used this code will fall back to displaying the raw code.')">
+      <button class="btn-danger">{{icon "trash"}}delete</button>
+    </form>
+    {{end}}
+  </td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<div class="empty-state">No hangup causes match this filter.</div>
+{{end}}
+
+<dialog id="cause-modal" style="max-width:640px">
+  <div class="modal-head">
+    <h3 id="cm-title">Edit cause</h3>
+    <button class="close" type="button" aria-label="Close dialog" onclick="closeModal('cause-modal')">×</button>
+  </div>
+  <form method="post" action="/cause-codes" id="cm-form">
+    <div class="modal-body">
+      <div class="hstack">
+        <div class="field">
+          <label class="label">Code</label>
+          <input name="code" id="cm-code" required pattern="[A-Za-z0-9_]+" maxlength="64"
+                 placeholder="e.g. 16 or insufficient_balance">
+        </div>
+        <div class="field">
+          <label class="label">Family</label>
+          <select name="family" id="cm-family">
+            <option value="platform">platform (our denial reasons)</option>
+            <option value="sip">SIP (stack-trace cause codes)</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label class="label">Short label
+          <span class="tip" data-tip="The text shown in the CDR-list cause cell. Keep it under 30 chars — long labels get ellipsis-truncated.">{{icon "info"}}</span>
+        </label>
+        <input name="label" id="cm-label" required maxlength="80" placeholder="e.g. user busy">
+      </div>
+      <div class="field">
+        <label class="label">Detail (tooltip text)
+          <span class="tip" data-tip="The longer explanation that appears when an admin hovers the info-icon next to the label. Plain text — angle brackets and ampersands are escaped automatically.">{{icon "info"}}</span>
+        </label>
+        <textarea name="detail" id="cm-detail" rows="4" placeholder="What this cause means. Why a call would end up here. What the operator should do about it."></textarea>
+      </div>
+      <p id="cm-builtin-note" class="muted" style="font-size:12px;margin:0;display:none">
+        {{icon "info"}} This is a built-in cause — you can re-word it but the row can't be deleted.
+        Changing the <strong>code</strong> would create a new row instead of renaming this one;
+        leave it alone unless you really want a separate cause.
+      </p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('cause-modal')">Cancel</button>
+      <button>Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+function openCauseModal(c){
+  document.getElementById('cm-title').textContent  = c.code ? ('Edit cause · '+c.code) : 'New cause';
+  document.getElementById('cm-code').value         = c.code   || '';
+  document.getElementById('cm-code').readOnly      = !!c.builtin || !!c.code; // codes are stable once created
+  document.getElementById('cm-label').value        = c.label  || '';
+  document.getElementById('cm-detail').value       = c.detail || '';
+  document.getElementById('cm-family').value       = c.family || 'platform';
+  document.getElementById('cm-builtin-note').style.display = c.builtin ? 'block' : 'none';
+  openModal('cause-modal');
+}
+</script>
+{{end}}

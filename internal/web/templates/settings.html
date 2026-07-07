@@ -1,0 +1,244 @@
+{{define "content"}}
+<style>
+  .stabs2{display:flex;flex-wrap:wrap;gap:.2rem;border-bottom:1px solid var(--border);margin-bottom:1.2rem}
+  .stabs2 a{padding:.55rem 1rem;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;font-size:13px;font-weight:500;cursor:pointer;user-select:none}
+  .stabs2 a:hover{color:var(--text)}
+  .stabs2 a.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .spane2{display:none}
+  .spane2.active{display:block}
+
+  /* Compact key-value editor table */
+  .kv table{table-layout:fixed}
+  .kv th:nth-child(1),.kv td:nth-child(1){width:32%}
+  .kv td.desc{font-size:11.5px;color:var(--muted);white-space:normal}
+  .kv input,.kv textarea{width:100%}
+
+  .pem textarea{font:11px ui-monospace,Menlo,monospace;width:100%;min-height:140px;background:#0d1117}
+</style>
+
+<div class="actions-bar">
+  <h1 style="margin:0">Settings</h1>
+  <span class="muted" style="font-size:13px">{{if .HTTPSConfigured}}{{icon "check"}}HTTPS active{{else}}{{icon "warning"}}HTTPS not configured{{end}}</span>
+</div>
+
+<div class="stabs2" id="settings-tabs">
+  <a data-tab="company" class="active" onclick="showSetTab(event,'company')">Company</a>
+  <a data-tab="site"    onclick="showSetTab(event,'site')">Site</a>
+  <a data-tab="admins"  onclick="showSetTab(event,'admins')">Admins</a>
+  <a data-tab="domains" onclick="showSetTab(event,'domains')">Domains &amp; SSL <span class="muted">({{len .Domains}})</span></a>
+</div>
+
+<!-- ============================================================ Company -->
+<div class="spane2 active" data-tab="company">
+  <div class="section">
+    <h2>Company / brand</h2>
+    <p class="muted" style="font-size:12.5px;margin-top:0">These strings appear in the admin GUI header, customer-facing emails, invoice templates, and the SIP-trace sanitization fallback.</p>
+    <form method="post" action="/settings?tab=company" class="kv">
+      <table>
+        <thead><tr><th>Setting</th><th>Value</th></tr></thead>
+        <tbody>
+        {{range .Company}}
+          <tr>
+            <td>
+              <label class="label" style="margin-bottom:0;font-weight:600">{{.Key}}</label>
+              <div class="desc">{{.Description}}</div>
+            </td>
+            <td>
+              {{if gt (len .Description) 80}}
+                <textarea name="kv:{{.Key}}" rows="2">{{.Value}}</textarea>
+              {{else}}
+                <input name="kv:{{.Key}}" value="{{.Value}}">
+              {{end}}
+            </td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+      <div class="row-actions" style="margin-top:.6rem"><button>{{icon "check"}}Save company settings</button></div>
+    </form>
+  </div>
+</div>
+
+<!-- ============================================================ Site -->
+<div class="spane2" data-tab="site">
+  <div class="section">
+    <h2>Site / runtime</h2>
+    <p class="muted" style="font-size:12.5px;margin-top:0">Tweakable runtime parameters — public address, retention, session length, and the HTTPS bind address.</p>
+    <form method="post" action="/settings?tab=site" class="kv">
+      <table>
+        <thead><tr><th>Setting</th><th>Value</th></tr></thead>
+        <tbody>
+        {{range .Site}}
+          <tr>
+            <td>
+              <label class="label" style="margin-bottom:0;font-weight:600">{{.Key}}</label>
+              <div class="desc">{{.Description}}</div>
+            </td>
+            <td><input name="kv:{{.Key}}" value="{{.Value}}"></td>
+          </tr>
+        {{end}}
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:12px;margin:.6rem 0 0">{{icon "info"}} Changes take effect immediately for the in-memory cache, but a few keys (<code>site.https_listen_addr</code>, <code>site.public_ip</code>) are read at startup — restart didapi to fully apply.</p>
+      <div class="row-actions" style="margin-top:.6rem"><button>{{icon "check"}}Save site settings</button></div>
+    </form>
+  </div>
+</div>
+
+<!-- ============================================================ Admins -->
+<div class="spane2" data-tab="admins">
+  <div class="section">
+    <h2>Administrator accounts</h2>
+    {{if .Admins}}
+    <table>
+      <thead><tr><th>ID</th><th>Email</th><th>Created</th></tr></thead>
+      <tbody>
+      {{range .Admins}}
+        <tr>
+          <td>#{{.ID}}</td>
+          <td><code>{{.Email}}</code></td>
+          <td class="muted">{{.Created}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="muted">No admins on file.</p>
+    {{end}}
+  </div>
+
+  <div class="section">
+    <h2>Change my password</h2>
+    <form method="post" action="/settings/admin/password" style="max-width:520px">
+      <div class="field">
+        <label class="label">Current password</label>
+        <input name="current" type="password" required autocomplete="current-password">
+      </div>
+      <div class="hstack">
+        <div class="field grow"><label class="label">New password (≥8)</label><input name="new_password" type="password" required minlength="8" autocomplete="new-password"></div>
+        <div class="field grow"><label class="label">Confirm</label><input name="confirm_password" type="password" required minlength="8" autocomplete="new-password"></div>
+      </div>
+      <div class="row-actions"><button>{{icon "check"}}Change password</button></div>
+    </form>
+  </div>
+</div>
+
+<!-- ============================================================ Domains & SSL -->
+<div class="spane2" data-tab="domains">
+  <div class="actions-bar">
+    <h2 style="margin:0">Domains &amp; SSL certificates</h2>
+    <button class="modal-trigger" onclick="openModal('add-domain-modal')">{{icon "plus"}}Add domain</button>
+  </div>
+
+  <p class="muted" style="font-size:12.5px;margin-top:0">
+    Each row maps an SNI hostname to a PEM certificate + private key. Pick one as <strong>default</strong> for clients that don't send SNI. If <code>site.https_listen_addr</code> is set and at least one row has a cert, didapi binds an HTTPS listener at startup.
+  </p>
+
+  {{if .Domains}}
+  <table>
+    <thead><tr><th>Hostname</th><th>Subject</th><th>Issuer</th><th>Expires</th><th>Default</th><th>Notes</th><th>Actions</th></tr></thead>
+    <tbody>
+    {{range .Domains}}
+      <tr>
+        <td><code>{{.Hostname}}</code></td>
+        <td class="muted">{{if .CertSubject}}{{.CertSubject}}{{else}}<span class="muted">— no cert —</span>{{end}}</td>
+        <td class="muted">{{.CertIssuer}}</td>
+        <td>{{if .CertExpiresAt}}<span class="muted">{{.CertExpiresAt.Format "2006-01-02"}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+        <td>{{if .IsDefault}}<span class="pill pill-active">default</span>{{else}}<span class="muted">—</span>{{end}}</td>
+        <td class="muted">{{.Notes}}</td>
+        <td class="row-actions">
+          <button onclick='openDomainEdit({id:{{.ID}}, hostname:{{js .Hostname | printf "%q"}}, isDefault:{{.IsDefault}}, notes:{{js .Notes | printf "%q"}}})'>{{icon "edit"}}edit</button>
+          <form method="post" action="/settings/domains/{{.ID}}/delete" style="display:inline" onsubmit="return confirm('Delete domain {{.Hostname}}? Drops its cert and HTTPS for this hostname.')">
+            <button class="btn-danger">{{icon "trash"}}delete</button>
+          </form>
+        </td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">No domains configured. Click <em>Add domain</em>, then paste in your cert+key.</p>
+  {{end}}
+</div>
+
+<!-- ===== Modals ===== -->
+
+<dialog id="add-domain-modal">
+  <div class="modal-head"><h3>Add domain</h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('add-domain-modal')">×</button></div>
+  <form method="post" action="/settings/domains">
+    <div class="modal-body">
+      <div class="field">
+        <label class="label">Hostname</label>
+        <input name="hostname" required pattern="[a-zA-Z0-9.\-*]+" placeholder="admin.example.com" autofocus>
+      </div>
+      <div class="field">
+        <label class="label">Notes (optional)</label>
+        <input name="notes" placeholder="e.g. main admin GUI hostname">
+      </div>
+      <p class="muted" style="font-size:12px;margin:.4rem 0 0">{{icon "info"}} You'll paste the certificate + private key in the next step (use the <em>edit</em> button on the new row).</p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('add-domain-modal')">Cancel</button>
+      <button>Add domain</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="edit-domain-modal" style="max-width:760px">
+  <div class="modal-head"><h3>Edit domain <span id="ed-host" class="muted"></span></h3><button class="close" type="button" aria-label="Close dialog" onclick="closeModal('edit-domain-modal')">×</button></div>
+  <form method="post" id="ed-form" class="pem">
+    <div class="modal-body">
+      <div class="hstack">
+        <div class="field grow"><label class="label">Notes</label><input name="notes" id="ed-notes"></div>
+        <label style="display:flex;align-items:center;gap:.4rem;font-size:13px;margin-top:1.2rem">
+          <input type="checkbox" name="is_default" id="ed-default" value="1" style="width:auto"> Default (SNI fallback)
+        </label>
+      </div>
+
+      <div class="field">
+        <label class="label">Certificate PEM
+          <span class="tip" data-tip="Paste the full chain — your leaf certificate first, then any intermediate(s). One or more BEGIN CERTIFICATE blocks.">{{icon "info"}}</span>
+        </label>
+        <textarea name="cert_pem" placeholder="-----BEGIN CERTIFICATE-----&#10;…&#10;-----END CERTIFICATE-----"></textarea>
+      </div>
+      <div class="field">
+        <label class="label">Private key PEM
+          <span class="tip" data-tip="The matching private key. RSA, ECDSA, or unencrypted PKCS#8 PRIVATE KEY all work. Encrypted keys must be decrypted before pasting.">{{icon "info"}}</span>
+        </label>
+        <textarea name="key_pem" placeholder="-----BEGIN PRIVATE KEY-----&#10;…&#10;-----END PRIVATE KEY-----"></textarea>
+      </div>
+      <p class="muted" style="font-size:12px;margin:0">
+        Leave both PEM fields blank to only update notes / default flag. Otherwise both are required and validated up front.
+      </p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('edit-domain-modal')">Cancel</button>
+      <button>{{icon "check"}}Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+function showSetTab(ev, name){
+  if (ev) ev.preventDefault();
+  document.querySelectorAll('#settings-tabs a').forEach(function(a){ a.classList.toggle('active', a.dataset.tab === name); });
+  document.querySelectorAll('.spane2').forEach(function(p){ p.classList.toggle('active', p.dataset.tab === name); });
+  history.replaceState(null, '', '#'+name);
+}
+(function(){
+  var h = (location.hash || '').replace('#','');
+  if (h && document.querySelector('#settings-tabs a[data-tab="'+h+'"]')){ showSetTab(null, h); }
+})();
+
+function openDomainEdit(d){
+  document.getElementById('ed-host').textContent  = '· ' + d.hostname;
+  document.getElementById('ed-form').action       = '/settings/domains/' + d.id;
+  document.getElementById('ed-notes').value       = d.notes || '';
+  document.getElementById('ed-default').checked   = !!d.isDefault;
+  // Don't pre-fill the cert/key — admins paste fresh PEM each time they edit.
+  document.querySelector('#ed-form textarea[name="cert_pem"]').value = '';
+  document.querySelector('#ed-form textarea[name="key_pem"]').value  = '';
+  openModal('edit-domain-modal');
+}
+</script>
+{{end}}

@@ -1,0 +1,19 @@
+[Unit]
+Description=RTPengine media proxy (DIDStorage)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/rtpengine \
+  --interface=@PUBLIC_IP@ \
+  --listen-ng=127.0.0.1:2223 \
+  --port-min=30000 --port-max=40000 \
+  --log-level=6 \
+  --foreground \
+  --no-fallback
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

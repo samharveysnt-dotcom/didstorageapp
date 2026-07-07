@@ -1,0 +1,199 @@
+{{define "content"}}
+<style>
+  .view-tabs{display:flex;gap:.2rem;border-bottom:1px solid var(--border);margin-bottom:1rem}
+  .view-tabs a{padding:.55rem 1rem;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;font-size:13px;font-weight:500;cursor:pointer}
+  .view-tabs a:hover{color:var(--text)}
+  .view-tabs a.active{color:var(--accent-text);border-bottom-color:var(--accent)}
+  .view-tabs .count{margin-left:.3em;font-size:11px;color:var(--muted);font-weight:400}
+  .view-tabs a.active .count{color:var(--accent-text)}
+</style>
+
+<div class="actions-bar">
+  <h1 style="margin:0">Orders <span class="muted" style="font-size:14px">({{.Total}})</span></h1>
+  <span class="muted" style="font-size:13px">per-DID rentals — create from a user's page</span>
+</div>
+
+<div class="view-tabs">
+  <a href="/orders" class="{{if eq .View "active"}}active{{end}}">
+    Active <span class="count">({{.ActiveCount}})</span>
+  </a>
+  <a href="/orders?view=archive" class="{{if eq .View "archive"}}active{{end}}">
+    Archive <span class="count">({{.ArchiveCount}})</span>
+  </a>
+</div>
+
+<form class="toolbar-band is-stack" method="get" action="/orders">
+  <div class="row">
+    <input class="grow" name="q" value="{{.Pg.Q}}" placeholder="Search every order by DID, user reference, or order id">
+    <select name="reseller_id">
+      <option value=""  {{if eq .FilterReseller ""}}selected{{end}}>All resellers</option>
+      <option value="0" {{if eq .FilterReseller "0"}}selected{{end}}>Direct (no reseller)</option>
+      {{range .Resellers}}<option value="{{.ID}}" {{if eq $.FilterReseller (printf "%d" .ID)}}selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
+    <select name="status">
+      <option value=""             {{if eq .FilterStatus ""}}selected{{end}}>Any status</option>
+      {{range $s := slice "active" "kyc_pending" "quarantined" "suspended" "cancelled"}}
+        <option value="{{$s}}" {{if eq $.FilterStatus $s}}selected{{end}}>{{$s}}</option>
+      {{end}}
+    </select>
+    <select name="per_page" title="rows per page">
+      {{range $n := slice 25 50 100 250 1000}}
+        <option value="{{$n}}" {{if eq $.Pg.PerPage $n}}selected{{end}}>{{$n}} per page</option>
+      {{end}}
+    </select>
+    <button>{{icon "search"}}Apply</button>
+    <a class="clear" href="/orders">clear filters</a>
+  </div>
+  <div class="row">
+    <input class="grow" id="orders-cs-q" type="search" placeholder="Filter visible rows" oninput="dsFilterOrders()">
+    <select id="orders-cs-kyc" onchange="dsFilterOrders()">
+      <option value="">Any KYC</option>
+      <option value="approved">Approved</option>
+      <option value="pending">Pending</option>
+      <option value="rejected">Rejected</option>
+      <option value="none">No bundle</option>
+    </select>
+    <span class="count right-align"><span data-filter-count="orders-tbody">{{len .Orders}}</span> visible of {{.Total}} total</span>
+  </div>
+</form>
+<script>
+function dsFilterOrders(){
+  clientFilterTable('orders-tbody',
+    document.getElementById('orders-cs-q').value,
+    {kyc: document.getElementById('orders-cs-kyc').value});
+}
+</script>
+
+{{if .Orders}}
+<table>
+<thead><tr>
+  <th><a class="sort {{if eq .Pg.Sort "id"}}active{{end}}" href="{{.Pg.SortLink "id"}}">#  {{.Pg.SortIcon "id"}}</a></th>
+  <th><a class="sort {{if eq .Pg.Sort "did"}}active{{end}}" href="{{.Pg.SortLink "did"}}">DID {{.Pg.SortIcon "did"}}</a></th>
+  <th>User / Reseller</th>
+  <th><a class="sort {{if eq .Pg.Sort "status"}}active{{end}}" href="{{.Pg.SortLink "status"}}">Status {{.Pg.SortIcon "status"}}</a></th>
+  <th>KYC</th>
+  <th class="num">Ch</th>
+  <th>Route</th>
+  <th><a class="sort {{if eq .Pg.Sort "next"}}active{{end}}" href="{{.Pg.SortLink "next"}}">Next billing {{.Pg.SortIcon "next"}}</a></th>
+  <th class="right" title="Last 30 days: NRC + MRC + per-channel + per-minute customer charges">30d revenue</th>
+  <th class="right" title="Revenue − supplier cost (CDR snapshot + supplier MRC/NRC from rate card)">30d profit</th>
+  <th class="right" title="All-time: NRC + MRC + per-channel + per-minute customer charges">Lifetime revenue</th>
+  <th class="right" title="All-time revenue minus all-time supplier cost">Lifetime profit</th>
+  <th>Actions</th>
+</tr></thead>
+<tbody id="orders-tbody">
+{{range .Orders}}
+<tr data-kyc="{{if .KycStatus}}{{.KycStatus}}{{else}}none{{end}}">
+  <td><a class="link" href="/orders/{{.ID}}">#{{.ID}}</a></td>
+  <td><a class="link" href="/orders/{{.ID}}"><code>{{.DID}}</code></a></td>
+  <td>
+    {{if .UserID}}<a class="link" href="/users/{{.UserID}}">{{if .UserRef}}{{.UserRef}}{{else}}#{{.UserID}}{{end}}</a>{{else}}<span class="muted">—</span>{{end}}
+    {{if .ResellerID}}<span class="subtext">· <a class="link" href="/resellers/{{.ResellerID}}">{{.Reseller}}</a></span>{{end}}
+  </td>
+  <td><span class="pill pill-{{.Status}}">{{.Status}}</span></td>
+  <td>{{if .KycStatus}}<span class="pill pill-{{.KycStatus}}">{{.KycStatus}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="num">{{.ChannelCount}}</td>
+  <td class="muted">{{siptarget .RouteKind .RouteTarget}}</td>
+  <td class="muted">{{.NextBilling}}</td>
+  <td class="num">{{if gt .Revenue30dDollars 0.0}}${{printf "%.2f" .Revenue30dDollars}}{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="num">{{if .HasProfit30d}}<span style="color:{{if lt .Profit30dDollars 0.0}}var(--err){{else}}var(--ok){{end}}">${{printf "%.2f" .Profit30dDollars}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="num">{{if gt .RevenueLifeDollars 0.0}}${{printf "%.2f" .RevenueLifeDollars}}{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="num">{{if .HasProfitLife}}<span style="color:{{if lt .ProfitLifeDollars 0.0}}var(--err){{else}}var(--ok){{end}}">${{printf "%.2f" .ProfitLifeDollars}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="row-actions">
+    <a class="link" href="/orders/{{.ID}}/export/cdrs.csv">{{icon "download"}}CSV</a>
+    {{if or (eq .Status "active") (eq .Status "kyc_pending") (eq .Status "quarantined")}}
+      <button onclick="openOrderEdit(this)"
+              data-id="{{.ID}}"
+              data-uid="{{.UserID}}"
+              data-did="{{.DID}}"
+              data-route-kind="{{.RouteKind}}"
+              data-route-target="{{.RouteTarget}}"
+              data-channel-count="{{.ChannelCount}}"
+              data-ann-day="{{.AnniversaryDay}}"
+              data-kyc="{{if .KycBundleID}}{{.KycBundleID}}{{end}}">{{icon "edit"}}edit</button>
+    {{end}}
+    <form method="post" action="/orders/{{.ID}}/cancel" style="display:inline" onsubmit="return confirm('Cancel order #{{.ID}} ({{.DID}})?  DID returns to the available pool.')">
+      <button class="btn-warn">{{icon "trash"}}cancel</button>
+    </form>
+  </td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{template "pagination" .Pg}}
+{{else}}
+<div class="empty-state">No orders match the current filters. <a href="/orders">Clear filters</a> to see everything.</div>
+{{end}}
+
+<dialog id="ord-edit-modal" style="max-width:680px">
+  <div class="modal-head">
+    <h3>Edit order <span id="oe-label" class="muted"></span></h3>
+    <button class="close" type="button" aria-label="Close dialog" onclick="closeModal('ord-edit-modal')">×</button>
+  </div>
+  <form method="post" id="oe-form" onsubmit="return validateOrdEdit()">
+    <div class="modal-body">
+      <p class="muted" style="font-size:13px;margin-top:0">For sip_account routes, the target must be a SIP peer that belongs to the order's user — server-side validation enforces this. For full peer dropdown UX use the user's <em>Orders</em> tab.</p>
+      <div class="hstack">
+        <div class="field">
+          <label class="label">Route kind</label>
+          <select name="route_kind" id="oe-kind" required>
+            <option value="sip_uri">sip_uri</option>
+            <option value="ip">ip</option>
+            <option value="sip_account">sip_account</option>
+          </select>
+        </div>
+        <div class="field grow">
+          <label class="label">Route target</label>
+          <input name="route_target" id="oe-target" required placeholder="sip:user@host  |  1.2.3.4:5060  |  username">
+        </div>
+      </div>
+      <div class="hstack">
+        <div class="field">
+          <label class="label">Channels (≥0)</label>
+          <input name="channel_count" id="oe-ch" type="number" min="0" max="8192" required>
+        </div>
+        <div class="field">
+          <label class="label">Anniversary day (1–28)</label>
+          <input name="anniversary_day" id="oe-ann" type="number" min="1" max="28" required>
+        </div>
+      </div>
+      <p id="oe-err" class="error" style="text-align:left;display:none;margin-top:.5rem"></p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('ord-edit-modal')">Cancel</button>
+      <button>{{icon "check"}}Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+function openOrderEdit(btn){
+  document.getElementById('oe-label').textContent = '· #' + btn.dataset.id + ' · DID ' + btn.dataset.did;
+  document.getElementById('oe-form').action = '/orders/' + btn.dataset.id + '/update';
+  document.getElementById('oe-kind').value   = btn.dataset.routeKind   || 'sip_uri';
+  document.getElementById('oe-target').value = btn.dataset.routeTarget || '';
+  document.getElementById('oe-ch').value     = btn.dataset.channelCount || '0';
+  document.getElementById('oe-ann').value    = btn.dataset.annDay       || '1';
+  document.getElementById('oe-err').style.display = 'none';
+  openModal('ord-edit-modal');
+}
+function validateOrdEdit(){
+  var err = document.getElementById('oe-err'); err.style.display = 'none';
+  var fail = function(m){ err.textContent = m; err.style.display = 'block'; return false; };
+  var rk = document.getElementById('oe-kind').value;
+  var rt = document.getElementById('oe-target').value.trim();
+  var ch = parseInt(document.getElementById('oe-ch').value, 10);
+  var an = parseInt(document.getElementById('oe-ann').value, 10);
+  if (!rt) return fail('route target is required');
+  if (rk === 'sip_uri' && !/^(sip:|sips:)/i.test(rt) && !/.+@.+/.test(rt))
+      return fail('sip_uri target should look like sip:user@host[:port]');
+  if (rk === 'ip' && !/^[\d.:a-fA-F\[\]]+$/.test(rt))
+      return fail('ip target must be a bare ip[:port]');
+  if (rk === 'sip_account' && !/^[a-zA-Z0-9_\-]{1,32}$/.test(rt))
+      return fail('sip_account target must be 1–32 chars [a-zA-Z0-9_-]');
+  if (isNaN(ch) || ch < 0 || ch > 8192) return fail('channels must be 0–8192');
+  if (isNaN(an) || an < 1 || an > 28) return fail('anniversary day must be 1–28');
+  return true;
+}
+</script>
+{{end}}

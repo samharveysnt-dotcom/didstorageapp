@@ -1,0 +1,3 @@
+BEGIN;
+ALTER TABLE orders DROP COLUMN IF EXISTS audio_group_id;
+COMMIT;

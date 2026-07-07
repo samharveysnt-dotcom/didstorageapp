@@ -1,0 +1,169 @@
+{{define "content"}}
+<style>
+/* Local refinements for /cdrs. The toolbar uses two hairline-bordered
+   stacks (one band, two rows visually) so the operator's eye reads
+   filter→search→apply once, then refinement filters once. Admin-action
+   chips render as hairline marginalia next to the state pill, so the
+   row's hot signal (state) stays the dominant visual. */
+.cdrs-toolbar{
+  background:var(--surface-1);
+  border:1px solid var(--line);
+  border-radius:6px;
+  padding:.65rem .9rem;
+  margin-bottom:1rem;
+  display:flex;flex-direction:column;gap:.55rem;
+}
+.cdrs-toolbar .row{display:flex;gap:.55rem;align-items:center;flex-wrap:wrap}
+.cdrs-toolbar .row + .row{padding-top:.55rem;border-top:1px solid var(--line-soft)}
+.cdrs-toolbar input,.cdrs-toolbar select{
+  background:var(--surface-2);border:1px solid var(--line);
+  padding:.4rem .6rem;font-size:12.5px;
+  border-radius:5px;
+}
+.cdrs-toolbar input::placeholder{color:var(--ink-3)}
+.cdrs-toolbar .grow{flex:1;min-width:200px}
+.cdrs-toolbar .clear{color:var(--ink-3);font-size:12px;padding:.4rem .25rem;text-decoration:none;border-bottom:1px dotted var(--ink-3)}
+.cdrs-toolbar .clear:hover{color:var(--ink-1);border-bottom-color:var(--ink-1)}
+
+/* Marginalia chip for admin-action stamps (live_hangup / live_redirect).
+   Reads as a hairline-bordered footnote, not a competing state signal. */
+.chip-marginalia{
+  display:inline-flex;align-items:center;gap:.2rem;
+  padding:.1rem .4rem;
+  background:transparent;
+  border:1px solid var(--line);
+  color:var(--ink-3);
+  border-radius:3px;
+  font-size:10px;font-weight:500;
+  letter-spacing:0.02em;text-transform:uppercase;
+  margin-left:.4rem;
+  white-space:nowrap;
+}
+.chip-marginalia .icon{width:11px;height:11px;opacity:.7}
+
+/* Profit colour: ink-1 stays default, severity tint only when profit is
+   negative (then --err for unambiguous loss signal) or strongly positive
+   (then --ok). Neutral profit renders as ink-1 mono. This dials back the
+   prior coloured-text-everywhere pattern so colour stays scarce. */
+.profit-pos{color:var(--ok)}
+.profit-neg{color:var(--err)}
+
+/* Empty state. Single-line text + a single secondary action. No
+   illustration, no card-wrap. */
+.cdrs-empty{
+  border:1px solid var(--line);
+  border-radius:6px;
+  padding:1.6rem;
+  text-align:center;
+  color:var(--ink-3);
+  font-size:13px;
+}
+.cdrs-empty a{color:var(--ink-1);border-bottom:1px solid var(--ink-3);text-decoration:none}
+.cdrs-empty a:hover{border-bottom-color:var(--accent)}
+</style>
+
+<div class="actions-bar">
+  <h1 style="margin:0">Call Detail Records <span class="muted" style="font-size:14px;font-weight:500">{{.Total}}</span></h1>
+  <a class="btn ghost" id="cdrs-csv-btn" onclick="downloadFilteredCsv(event,this)" data-base="/cdrs/export.csv" href="#">{{icon "download"}}CSV</a>
+</div>
+
+<form method="get" action="/cdrs">
+  <div class="cdrs-toolbar">
+    <div class="row">
+      <input class="grow" name="q" value="{{.Pg.Q}}" placeholder="Search call_id, from URI, or to URI">
+      <select name="reseller_id">
+        <option value=""  {{if eq .FilterReseller ""}}selected{{end}}>All resellers</option>
+        <option value="0" {{if eq .FilterReseller "0"}}selected{{end}}>Direct (no reseller)</option>
+        {{range .Resellers}}<option value="{{.ID}}" {{if eq $.FilterReseller (printf "%d" .ID)}}selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+      <select name="state">
+        <option value=""         {{if eq .FilterState ""}}selected{{end}}>Any state</option>
+        <option value="answered" {{if eq .FilterState "answered"}}selected{{end}}>Answered</option>
+        <option value="failed"   {{if eq .FilterState "failed"}}selected{{end}}>Failed</option>
+      </select>
+      <select name="per_page" title="rows per page">
+        {{range $n := slice 25 50 100 250 1000}}
+          <option value="{{$n}}" {{if eq $.Pg.PerPage $n}}selected{{end}}>{{$n}} per page</option>
+        {{end}}
+      </select>
+      <button>{{icon "search"}}Apply</button>
+      <a class="clear" href="/cdrs">clear filters</a>
+    </div>
+    <div class="row">
+      <input name="user_id"     value="{{.FilterUserID}}"     placeholder="user_id"             style="width:110px">
+      <input name="order_id"    value="{{.FilterOrderID}}"    placeholder="order_id"            style="width:110px">
+      <input name="external_id" value="{{.FilterExternalID}}" placeholder="external_id"         style="width:190px">
+      <input name="did"         value="{{.FilterDID}}"        placeholder="DID substring"       style="width:170px">
+      <span style="flex:1"></span>
+      {{template "daterange" dict "FromID" "cdr-from" "ToID" "cdr-to" "FromValue" .FilterFrom "ToValue" .FilterTo}}
+    </div>
+  </div>
+</form>
+
+{{if .CDRs}}
+<table>
+<thead><tr>
+  <th><a class="sort {{if eq .Pg.Sort "started"}}active{{end}}" href="{{.Pg.SortLink "started"}}">Started {{.Pg.SortIcon "started"}}</a></th>
+  <th>State</th>
+  <th><a class="sort {{if eq .Pg.Sort "did"}}active{{end}}" href="{{.Pg.SortLink "did"}}">DID {{.Pg.SortIcon "did"}}</a></th>
+  <th>User</th>
+  <th>Order</th>
+  <th>Supplier</th>
+  <th>From</th>
+  <th>To (route)</th>
+  <th class="num"><a class="sort {{if eq .Pg.Sort "billsec"}}active{{end}}" href="{{.Pg.SortLink "billsec"}}">Duration {{.Pg.SortIcon "billsec"}}</a></th>
+  <th class="num">Min</th>
+  <th class="num"><a class="sort {{if eq .Pg.Sort "charge"}}active{{end}}" href="{{.Pg.SortLink "charge"}}">Charge {{.Pg.SortIcon "charge"}}</a></th>
+  <th class="num">Profit</th>
+  <th>Cause</th>
+  <th></th>
+</tr></thead>
+<tbody>
+{{range .CDRs}}
+<tr>
+  <td>{{.Started}}</td>
+  <td>
+    {{if eq .State "answered"}}<span class="pill pill-active">answered</span>
+    {{else if eq .State "no_answer"}}<span class="pill pill-warn">no answer</span>
+    {{else if eq .State "busy"}}<span class="pill pill-warn">busy</span>
+    {{else if eq .State "rejected"}}<span class="pill pill-suspended">rejected</span>
+    {{else if eq .State "no_route"}}<span class="pill pill-suspended">no route</span>
+    {{else}}<span class="pill pill-suspended">{{.State}}</span>{{end}}
+    {{if eq .AdminAction "live_hangup"}}<span class="chip-marginalia tip" data-tip="Force-hung up by an admin from /live. {{.AdminActionReason}}">{{icon "x"}}admin hangup</span>
+    {{else if eq .AdminAction "live_warn"}}<span class="chip-marginalia tip" data-tip="Admin played a warning prompt then ended the call. {{.AdminActionReason}}">{{icon "warning"}}admin warned</span>
+    {{else if eq .AdminAction "live_redirect"}}<span class="chip-marginalia tip" data-tip="Admin re-bridged the call to a new destination. {{.AdminActionReason}}">{{icon "arrow-right"}}admin redirected</span>
+    {{end}}
+  </td>
+  <td>{{if .DIDID}}<a class="link" href="/dids/{{.DIDID}}/cdrs"><code>{{.DID}}</code></a>{{else}}<code>{{.DID}}</code>{{end}}</td>
+  <td>{{if .UserRef}}{{if .UserID}}<a class="link" href="/users/{{.UserID}}"><code>{{.UserRef}}</code></a>{{else}}<code>{{.UserRef}}</code>{{end}}{{else}}<span class="muted">—</span>{{end}}</td>
+  <td class="muted">{{if .OrderID}}<a class="link" href="/orders/{{.OrderID}}">#{{.OrderID}}</a>{{else}}—{{end}}</td>
+  <td>{{if .SupplierID}}<a class="link" href="/suppliers/{{.SupplierID}}">{{.Supplier}}</a>{{else}}{{.Supplier}}{{end}}</td>
+  <td>{{sipcaller .SrcURI}}</td>
+  <td>{{siptarget .RoutedKind .RoutedTarget}}</td>
+  <td class="num"><span class="tip" data-tip="{{preciseDuration .Billsec}} ({{.Billsec}}s raw)">{{compactDuration .Billsec}}</span></td>
+  <td class="num">{{.ChargedMinutes}}</td>
+  <td class="num">${{printf "%.2f" .ChargeDollars}}</td>
+  <td class="num">{{if .HasProfit}}<span class="tip {{if lt .ProfitDollars 0.0}}profit-neg{{else if gt .ProfitDollars 0.001}}profit-pos{{end}}" data-tip="customer ${{printf "%.4f" .ChargeDollars}} | supplier ${{printf "%.4f" .SupplierChargeDollars}}">${{printf "%.4f" .ProfitDollars}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+  <td>{{hangupcause .HangupCause}}</td>
+  <td class="right"><a class="link" href="/cdrs/{{.CallID}}/sip-trace">{{icon "external"}}trace</a></td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{template "pagination" .Pg}}
+{{else}}
+<div class="cdrs-empty">
+  No CDRs match these filters. <a href="/cdrs">Clear filters</a> to see everything.
+</div>
+{{end}}
+
+<script>
+// Re-use the page's currently-applied filters when downloading the CSV.
+function downloadFilteredCsv(ev, btn){
+  ev.preventDefault();
+  var qs = new URLSearchParams(window.location.search);
+  qs.delete('page'); qs.delete('per_page');
+  window.location.href = btn.dataset.base + '?' + qs.toString();
+}
+</script>
+{{end}}

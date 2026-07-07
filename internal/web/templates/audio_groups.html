@@ -1,0 +1,111 @@
+{{define "content"}}
+<div class="actions-bar">
+  <h1 style="margin:0">Audio groups <span class="muted" style="font-size:14px;font-weight:500"><span data-filter-count="groups-tbody">{{len .Groups}}</span></span></h1>
+  <div class="row" style="gap:.4rem">
+    <a class="btn-secondary" href="/audio-files">Library</a>
+    <button onclick="openModal('new-group-modal')">+ New group</button>
+  </div>
+</div>
+
+<form class="toolbar-band is-stack" onsubmit="event.preventDefault()"
+      oninput="clientFilterTable('groups-tbody', this.elements.q.value, {status: this.elements.fstatus.value})">
+  <div class="row">
+    <input class="grow" name="q" type="search" placeholder="Filter visible rows by group name or note">
+    <select name="fstatus">
+      <option value="">Any status</option>
+      <option value="inuse">In use</option>
+      <option value="unused">Unused</option>
+    </select>
+    <button type="reset" class="ghost" onclick="setTimeout(function(){document.querySelector('.toolbar-band').dispatchEvent(new Event('input',{bubbles:true}));},0)">Reset</button>
+  </div>
+  <div class="row">
+    <span class="muted" style="font-size:12px">
+      A group is a named bundle of clips. Reserve a DID with route <code>audio_group</code> and
+      every call gets a different clip from the bundle (random, no immediate repeats).
+    </span>
+  </div>
+</form>
+
+{{if .Groups}}
+<table>
+  <thead><tr>
+    <th>Name</th>
+    <th>Clips</th>
+    <th>Total length</th>
+    <th>Reserved DIDs</th>
+    <th>Note</th>
+    <th>Created</th>
+    <th>By</th>
+    <th>Status</th>
+    <th>Actions</th>
+  </tr></thead>
+  <tbody id="groups-tbody">
+  {{range .Groups}}
+  <tr data-status="{{if gt .DIDUsage 0}}inuse{{else}}unused{{end}}">
+    <td><a class="link" href="/audio-groups/{{.ID}}"><strong>{{.Name}}</strong></a></td>
+    <td class="num num-sm">{{.MemberCount}}</td>
+    <td class="num num-sm">{{.TotalLabel}}</td>
+    <td class="num num-sm">{{.DIDUsage}}</td>
+    <td class="muted">{{if .Note}}{{.Note}}{{else}}—{{end}}</td>
+    <td class="muted">{{.CreatedAt}}</td>
+    <td class="muted">{{if .CreatedBy}}{{.CreatedBy}}{{else}}—{{end}}</td>
+    <td>
+      {{if gt .DIDUsage 0}}
+        <span class="pill pill-assigned">in use · {{.DIDUsage}}</span>
+      {{else}}
+        <span class="pill pill-available">unused</span>
+      {{end}}
+    </td>
+    <td class="row-actions">
+      <a class="btn-secondary" href="/audio-groups/{{.ID}}">open</a>
+      <form method="post" action="/audio-groups/{{.ID}}/delete" style="display:inline"
+            onsubmit="return confirm('Delete group {{.Name}}? Files inside stay in the library.')">
+        <button class="btn-danger" {{if gt .DIDUsage 0}}disabled title="release the reservation first"{{end}}>delete</button>
+      </form>
+    </td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}
+<div class="section" style="text-align:center;padding:2rem">
+  <p class="muted" style="margin:0 0 .6rem">No audio groups yet.</p>
+  <p class="muted" style="margin:0;font-size:12px">
+    Groups let one reserved DID rotate through several clips (random-no-repeat).
+    Create a group, add some clips, then pick <em>audio_group</em> as the route kind when reserving.
+  </p>
+  <p style="margin-top:1rem;margin-bottom:0">
+    <button onclick="openModal('new-group-modal')">+ New group</button>
+  </p>
+</div>
+{{end}}
+
+<dialog id="new-group-modal">
+  <div class="modal-head">
+    <h3>New audio group</h3>
+    <button class="close" type="button" aria-label="Close" onclick="closeModal('new-group-modal')">×</button>
+  </div>
+  <form method="post" action="/audio-groups">
+    <div class="modal-body">
+      <p class="muted" style="margin-top:0;font-size:12px">
+        Name the group, then add clips on the next screen (or use bulk upload from the library
+        and pick this group as the destination).
+      </p>
+      <div class="field">
+        <label class="label">Group name</label>
+        <input name="name" required maxlength="60" autofocus
+               placeholder="e.g. ivr_after_hours, welcome_campaign">
+      </div>
+      <div class="field">
+        <label class="label">Note <span class="muted">(optional)</span></label>
+        <textarea name="note" rows="2" maxlength="400"
+                  placeholder="What is this group for? Who's it tied to?"></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('new-group-modal')">Cancel</button>
+      <button>Create group</button>
+    </div>
+  </form>
+</dialog>
+{{end}}

@@ -1,0 +1,547 @@
+{{define "content"}}
+<style>
+  /* Live calls — server-rendered initial HTML, then live updates over SSE
+   * (GET /live/stream). One JSON snapshot per second; client re-renders the
+   * table body in place. No meta-refresh, no full page reloads.
+   */
+  .live-status{display:inline-flex;align-items:center;gap:.45rem;font-size:11.5px;color:var(--muted)}
+  .live-status .pulse{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 rgba(35,165,90,.4);animation:pulse 1.8s infinite}
+  .live-status.disconnected .pulse{background:var(--warn);animation:none}
+  .live-status.disconnected{color:var(--warn)}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(35,165,90,.5)}
+    70%{box-shadow:0 0 0 10px rgba(35,165,90,0)}
+    100%{box-shadow:0 0 0 0 rgba(35,165,90,0)}
+  }
+  .live-empty{padding:3rem 1.5rem;text-align:center;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--muted)}
+  .live-empty .icon-circle{display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:50%;background:#1e1f22;border:1px solid var(--border);margin-bottom:.7rem}
+  .live-actions{display:flex;gap:.35rem;align-items:center}
+  /* Compact row-buttons — the default button size is too tall for a 38px
+   * list row. Keep icon size constant but tighten padding + font + radius. */
+  .live-actions button{
+    padding:.22rem .55rem;
+    font-size:11.5px;
+    font-weight:500;
+    border-radius:5px;
+    line-height:1.25;
+    display:inline-flex;align-items:center;gap:.3rem;
+  }
+  .live-actions button .icon{width:12px;height:12px}
+  .age-cell{font-variant-numeric:tabular-nums;color:var(--text)}
+  .age-cell.long{color:var(--warn);font-weight:600}
+  /* Subtle highlight when a row's data changes between snapshots. */
+  @keyframes row-pulse{0%{background:rgba(154,166,255,.10)}100%{background:transparent}}
+  tr.row-updated td{animation:row-pulse 1.5s ease-out}
+</style>
+
+<div class="actions-bar">
+  <div>
+    <h1 style="margin:0">Active calls <span class="muted" style="font-size:14px" id="live-total">({{.Total}})</span></h1>
+    <div class="live-status" id="live-status">
+      <span class="pulse"></span><span id="live-status-text">connecting…</span>
+    </div>
+  </div>
+  <div class="row-actions">
+    <form method="post" action="/live/force-cleanup" style="display:inline"
+          onsubmit="return confirm('Force-cleanup will remove any live-call rows whose Asterisk channel is no longer present.\n\nReal in-flight calls are left alone. Continue?')">
+      <button type="submit" class="btn ghost" title="Evict ghost entries — rows whose underlying Asterisk channel is gone (e.g. from /sipctl/authorize probes or a CDR that never landed).">{{icon "trash"}}Force cleanup</button>
+    </form>
+    <a class="btn ghost" href="/cdrs">{{icon "external"}}History (CDRs)</a>
+  </div>
+</div>
+
+<div id="live-table-wrap">
+  {{/* Table + thead are ALWAYS rendered, even when there are no live calls.
+       The empty state is a single hidden <tr> inside the same <tbody>, shown
+       only when no data rows exist. This guarantees that transient empty
+       snapshots from /live/stream never destroy the table shell — the JS
+       updates rows in place, it never replaces the wrap. */}}
+  <table id="live-table">
+    <thead><tr>
+      <th>Started</th>
+      <th>Age</th>
+      <th>Status</th>
+      <th>DID</th>
+      <th>Customer</th>
+      <th>From</th>
+      <th>Routed to</th>
+      <th>Source IP</th>
+      <th>Call-ID</th>
+      <th>Actions</th>
+    </tr></thead>
+    <tbody id="live-tbody">
+    {{range .Calls}}
+      <tr data-call-id="{{.CallID}}">
+        <td class="muted" style="font-variant-numeric:tabular-nums">{{.StartedAtUTC}}</td>
+        <td class="age-cell" data-started="{{.StartedAtUnix}}">—</td>
+        <td class="state-cell">
+          {{if eq .State "answered"}}<span class="pill pill-active">answered</span>
+          {{else if eq .State "ringing"}}<span class="pill pill-warn">ringing</span>
+          {{else if eq .State "connecting"}}<span class="pill pill-warn">connecting</span>
+          {{else if .State}}<span class="pill pill-warn">{{.State}}</span>
+          {{else}}<span class="muted">—</span>{{end}}
+        </td>
+        <td>
+          {{if .E164}}{{if .DIDID}}<a class="link" href="/dids/{{.DIDID}}/cdrs"><code>{{.E164}}</code></a>{{else}}<code>{{.E164}}</code>{{end}}{{else}}<span class="muted">—</span>{{end}}
+          {{if .DIDType}}<span class="subtext">· {{didtype .DIDType}} · {{.Country}}</span>{{end}}
+          {{if .LastAdminAction}}<span class="pill pill-warn" style="margin-left:.4em" title="admin {{.LastAdminAction}} mid-call">↪ {{.LastAdminAction}}</span>{{end}}
+        </td>
+        <td>
+          {{if .Reserved}}
+            <span class="pill pill-warn">reserved DID</span>
+          {{else if .UserID}}
+            <a class="link" href="/users/{{.UserID}}">{{if .UserRef}}{{.UserRef}}{{else}}#{{.UserID}}{{end}}</a>
+            {{if .ResellerID}}<span class="subtext">· <a class="link" href="/resellers/{{.ResellerID}}">{{.Reseller}}</a></span>{{end}}
+          {{else}}
+            <span class="muted">—</span>
+          {{end}}
+        </td>
+        <td>{{if .SrcURI}}<code>{{.SrcURIBare}}</code>{{else}}<span class="muted">—</span>{{end}}</td>
+        <td class="muted">{{siptarget .RouteKind .RouteTarget}}</td>
+        <td class="muted"><code>{{.SrcIP}}</code></td>
+        <td class="muted" style="max-width:240px"><code>{{.CallID}}</code></td>
+        <td class="live-actions">
+          <button class="btn-secondary"
+                  onclick="openRedirectModal('{{.CallID}}', '{{js .E164}}', '{{js (or .UserRef "—")}}')"
+                  title="Move this call to a new destination">
+            {{icon "arrow-right"}}Redirect
+          </button>
+          <button class="btn-danger"
+                  onclick="openHangupModal('{{.CallID}}', '{{js .E164}}', '{{js (or .UserRef "—")}}')"
+                  title="Force-hangup this call">
+            {{icon "x"}}Hangup
+          </button>
+        </td>
+      </tr>
+    {{end}}
+    {{/* The empty-state placeholder. Visible only when no data-call-id rows
+         exist; hidden as soon as a single call lands. */}}
+    <tr id="live-empty-row"{{if .Calls}} style="display:none"{{end}}>
+      <td colspan="10" class="muted" style="text-align:center;padding:3rem 1rem">
+        <div style="display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:50%;background:#1e1f22;border:1px solid var(--border);margin-bottom:.6rem">{{icon "phone"}}</div>
+        <div style="font-size:1rem;color:var(--text);margin-bottom:.25rem">No active calls</div>
+        <div style="font-size:13px">The platform is idle. New INVITEs land here within ~1s of being authorized.</div>
+      </td>
+    </tr>
+    </tbody>
+  </table>
+</div>
+
+<p class="muted" style="font-size:11.5px;margin-top:1rem;line-height:1.6">
+  {{icon "info"}}This view tracks calls between <code>/sipctl/authorize</code> (allow) and <code>/sipctl/cdr</code> (BYE).
+  Hangup uses <code>asterisk -rx</code> against the inbound channel (matched by dialed DID).
+  Every hangup is audit-logged to <code>journalctl -u didapi</code> with the acting admin id.
+</p>
+
+<dialog id="hangup-modal">
+  <div class="modal-head">
+    <h3>Hang up call <span id="hangup-label" class="muted"></span></h3>
+    <button type="button" class="close" onclick="closeModal('hangup-modal')" aria-label="Close dialog">×</button>
+  </div>
+  <form method="post" id="hangup-form">
+    <div class="modal-body">
+      <p class="muted" style="margin-top:0;font-size:13px;line-height:1.55">
+        This sends a SIP BYE to both legs immediately. The caller will hear the line drop;
+        any in-progress audio is cut. Recorded in the journal with your admin ID and the reason below.
+      </p>
+      <div class="field">
+        <label class="label">Reason — recorded in audit log</label>
+        <textarea name="reason" rows="2" required
+                  placeholder="e.g. suspected fraud, customer requested, malicious caller, abuse rule"></textarea>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('hangup-modal')">Cancel</button>
+      <button class="btn-danger">Force hangup</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="redirect-modal" style="max-width:620px">
+  <div class="modal-head">
+    <h3>Redirect call <span id="redirect-label" class="muted"></span></h3>
+    <button type="button" class="close" onclick="closeModal('redirect-modal')" aria-label="Close dialog">×</button>
+  </div>
+  <form method="post" id="redirect-form" onsubmit="return validateRedirect()">
+    <div class="modal-body">
+      <p class="muted" style="margin-top:0;font-size:13px;line-height:1.55">
+        Drops the existing outbound leg and bridges the caller to a new destination. The caller stays connected; the called party hears the line drop. Same target conventions as the order's <code>route_kind</code>/<code>route_target</code>.
+      </p>
+      {{/* align-items:flex-start so the hint span under route_target doesn't
+           drag the route_kind select downward via the hstack's default
+           vertical-center. Both .label + control rows now top-align. */}}
+      <div class="hstack" style="align-items:flex-start">
+        <div class="field" style="margin-bottom:0">
+          <label class="label">Route kind</label>
+          <select name="route_kind" id="rdr-kind" required onchange="updateRedirectHint()">
+            <option value="sip_uri">sip_uri</option>
+            <option value="ip">ip</option>
+            <option value="sip_account">sip_account (in-system peer)</option>
+            <option value="audio">audio_clip</option>
+            <option value="audio_group">audio_group</option>
+          </select>
+        </div>
+        <div class="field grow" style="margin-bottom:0">
+          <label class="label">Route target</label>
+          <input name="route_target" id="rdr-target"
+                 placeholder="sip:904@example.com">
+          <select name="audio_file_id" id="rdr-audio-select" disabled style="display:none">
+            <option value="">— loading clips… —</option>
+          </select>
+          <select name="audio_group_id" id="rdr-audiogroup-select" disabled style="display:none">
+            <option value="">— loading groups… —</option>
+          </select>
+          <span class="muted" id="rdr-hint" style="font-size:11.5px;margin-top:.3rem;display:block">e.g. <code>sip:904@example.com</code> or <code>user@host:port</code></span>
+        </div>
+      </div>
+      <div class="field">
+        <label class="label">Reason — recorded in audit log</label>
+        <textarea name="reason" rows="2" required placeholder="e.g. fraud — diverting to monitored honeypot"></textarea>
+      </div>
+      <p id="rdr-err" class="error" style="text-align:left;margin-top:.5rem;display:none"></p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="ghost" onclick="closeModal('redirect-modal')">Cancel</button>
+      <button>Redirect call</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+// ----- inline icon SVGs for SSE-rendered rows -----
+// (the {{icon "..."}} template helper only fires server-side, so we mirror
+// the same paths here for rows that arrive after page load via /live/stream)
+var ICON_SVG_HEAD = '<svg class="icon" width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+var ICON_REDIRECT = ICON_SVG_HEAD + '<polyline points="6 4 12 10 6 16"/></svg>';
+var ICON_X        = ICON_SVG_HEAD + '<line x1="5" y1="5" x2="15" y2="15"/><line x1="15" y1="5" x2="5" y2="15"/></svg>';
+
+// ----- modal helpers (reuse layout's openModal/closeModal) -----
+function callLabel(did, userRef){
+  var labelParts = [];
+  if (did)     labelParts.push(did);
+  if (userRef && userRef !== '—') labelParts.push(userRef);
+  return labelParts.length ? '· ' + labelParts.join(' · ') : '';
+}
+function openHangupModal(callID, did, userRef){
+  document.getElementById('hangup-label').textContent = callLabel(did, userRef);
+  document.getElementById('hangup-form').action = '/live/' + encodeURIComponent(callID) + '/hangup';
+  openModal('hangup-modal');
+}
+
+function openRedirectModal(callID, did, userRef){
+  document.getElementById('redirect-label').textContent = callLabel(did, userRef);
+  document.getElementById('redirect-form').action = '/live/' + encodeURIComponent(callID) + '/redirect';
+  // Reset prior validation error if any.
+  var err = document.getElementById('rdr-err');
+  if (err) err.style.display = 'none';
+  updateRedirectHint();
+  openModal('redirect-modal');
+}
+// Lazy-fetch audio + group options the first time those kinds are picked.
+var __rdrAudioLoaded = false;
+var __rdrGroupLoaded = false;
+function rdrLoadAudio(){
+  if (__rdrAudioLoaded) return Promise.resolve();
+  return fetch('/audio-files/options.json').then(function(r){return r.json();}).then(function(list){
+    var sel = document.getElementById('rdr-audio-select');
+    sel.innerHTML = '';
+    if (!list.length){
+      var o = document.createElement('option');
+      o.value = ''; o.textContent = '— no clips uploaded —';
+      sel.appendChild(o);
+    } else {
+      list.forEach(function(it){
+        var o = document.createElement('option');
+        o.value = it.id;
+        o.textContent = it.name + ' (' + it.duration + ')';
+        sel.appendChild(o);
+      });
+    }
+    __rdrAudioLoaded = true;
+  });
+}
+function rdrLoadGroups(){
+  if (__rdrGroupLoaded) return Promise.resolve();
+  return fetch('/audio-groups/options.json').then(function(r){return r.json();}).then(function(list){
+    var sel = document.getElementById('rdr-audiogroup-select');
+    sel.innerHTML = '';
+    var usable = list.filter(function(g){ return g.member_count > 0; });
+    if (!usable.length){
+      var o = document.createElement('option');
+      o.value = ''; o.textContent = '— no non-empty groups —';
+      sel.appendChild(o);
+    } else {
+      usable.forEach(function(g){
+        var o = document.createElement('option');
+        o.value = g.id;
+        o.textContent = g.name + ' (' + g.member_count + ' clip' + (g.member_count === 1 ? '' : 's') + ')';
+        sel.appendChild(o);
+      });
+    }
+    __rdrGroupLoaded = true;
+  });
+}
+
+function updateRedirectHint(){
+  var k = document.getElementById('rdr-kind').value;
+  var hint = document.getElementById('rdr-hint');
+  var input = document.getElementById('rdr-target');
+  var asel  = document.getElementById('rdr-audio-select');
+  var gsel  = document.getElementById('rdr-audiogroup-select');
+  function hideAll(){
+    input.disabled = true;  input.style.display = 'none';  input.required = false;
+    asel.disabled  = true;  asel.style.display  = 'none';  asel.required  = false;
+    gsel.disabled  = true;  gsel.style.display  = 'none';  gsel.required  = false;
+  }
+  if (k === 'sip_uri'){
+    hideAll();
+    input.disabled = false; input.style.display = ''; input.required = true;
+    hint.innerHTML = 'e.g. <code>sip:904@example.com</code> or <code>user@host:port</code>';
+    input.placeholder = 'sip:904@example.com';
+  } else if (k === 'ip'){
+    hideAll();
+    input.disabled = false; input.style.display = ''; input.required = true;
+    hint.innerHTML = 'e.g. <code>1.2.3.4</code> or <code>1.2.3.4:5060</code> — dialled number stays the DID';
+    input.placeholder = '1.2.3.4:5060';
+  } else if (k === 'sip_account'){
+    hideAll();
+    input.disabled = false; input.style.display = ''; input.required = true;
+    hint.innerHTML = 'username of a SIP peer registered to this platform (1-32 chars [a-zA-Z0-9_-])';
+    input.placeholder = 'peerusername';
+  } else if (k === 'audio'){
+    hideAll();
+    asel.disabled = false; asel.style.display = ''; asel.required = true;
+    hint.innerHTML = 'plays the clip once and ends the call (caller hears the clip then the line drops)';
+    rdrLoadAudio();
+  } else if (k === 'audio_group'){
+    hideAll();
+    gsel.disabled = false; gsel.style.display = ''; gsel.required = true;
+    hint.innerHTML = 'picks one clip from the group at random (excluding whichever played most recently for this group) and ends the call';
+    rdrLoadGroups();
+  }
+}
+function validateRedirect(){
+  var err = document.getElementById('rdr-err');
+  err.style.display = 'none';
+  var fail = function(m){ err.textContent = m; err.style.display = 'block'; return false; };
+  var k = document.getElementById('rdr-kind').value;
+  if (k === 'audio'){
+    if (!document.getElementById('rdr-audio-select').value) return fail('pick an audio clip');
+    return true;
+  }
+  if (k === 'audio_group'){
+    if (!document.getElementById('rdr-audiogroup-select').value) return fail('pick a non-empty audio group');
+    return true;
+  }
+  var t = document.getElementById('rdr-target').value.trim();
+  if (!t) return fail('target is required');
+  if (k === 'sip_uri' && !/.+@.+/.test(t)) return fail('sip_uri must contain user@host');
+  if (k === 'ip' && !/^[0-9.]+(?::[0-9]+)?$/.test(t)) return fail('ip must be ip[:port]');
+  if (k === 'sip_account' && !/^[a-zA-Z0-9_-]{1,32}$/.test(t)) return fail('sip_account must be 1-32 chars [a-zA-Z0-9_-]');
+  return true;
+}
+
+// ----- SSE stream -----
+// EventSource auto-reconnects on disconnect (browser-native). On every
+// snapshot the table body is rebuilt from JSON. We diff existing rows by
+// data-call-id so we don't blow away the DOM when nothing changed — and
+// flash a subtle highlight on rows whose age has changed.
+var liveES = null;
+function connectLiveStream(){
+  if (typeof EventSource === 'undefined'){
+    document.getElementById('live-status-text').textContent = 'EventSource unsupported';
+    return;
+  }
+  liveES = new EventSource('/live/stream');
+  liveES.addEventListener('open', function(){
+    document.getElementById('live-status').classList.remove('disconnected');
+    document.getElementById('live-status-text').textContent = 'streaming live · 1s';
+  });
+  liveES.addEventListener('error', function(){
+    document.getElementById('live-status').classList.add('disconnected');
+    document.getElementById('live-status-text').textContent = 'reconnecting…';
+  });
+  liveES.addEventListener('snapshot', function(ev){
+    try {
+      var rows = JSON.parse(ev.data);
+      renderRows(rows || []);
+    } catch(e) {
+      console.error('snapshot parse', e);
+    }
+  });
+}
+
+function renderRows(rows){
+  // Update the count badge regardless of what happens below.
+  document.getElementById('live-total').textContent = '('+rows.length+')';
+
+  // The table + thead + #live-tbody + #live-empty-row are server-rendered
+  // and PERMANENT. Never replace wrap.innerHTML — that's what was nuking
+  // multi-call sessions when a transient empty snapshot landed mid-action.
+  var tbody    = document.getElementById('live-tbody');
+  var emptyRow = document.getElementById('live-empty-row');
+  if (!tbody) return; // page not on /live yet, shouldn't happen
+
+  // Snapshot rows the table CURRENTLY shows, keyed by call_id.
+  var existing = {};
+  Array.prototype.forEach.call(tbody.querySelectorAll('tr[data-call-id]'), function(tr){
+    existing[tr.dataset.callId] = tr;
+  });
+
+  // Upsert each call in the snapshot.
+  var seen = {};
+  rows.forEach(function(c){
+    seen[c.call_id] = true;
+    var tr = existing[c.call_id];
+    if (!tr){
+      tr = document.createElement('tr');
+      tr.dataset.callId = c.call_id;
+      tr.innerHTML = rowHTML(c);
+      // Insert BEFORE the empty-state row so it sits at the bottom of
+      // the data rows. appendChild would put new rows AFTER the empty
+      // row, which would render them below the placeholder.
+      if (emptyRow) tbody.insertBefore(tr, emptyRow);
+      else tbody.appendChild(tr);
+      tr.classList.add('row-updated');
+      setTimeout(function(){ tr.classList.remove('row-updated'); }, 1500);
+    }
+    // Update the age cell — server sends started_at_unix; we render the
+    // delta client-side so duration ticks smoothly between snapshots.
+    var ageCell = tr.querySelector('.age-cell');
+    if (ageCell){
+      ageCell.dataset.started = c.started_at_unix;
+      var s = Math.floor(Date.now()/1000) - c.started_at_unix;
+      ageCell.textContent = fmtAge(s);
+      ageCell.classList.toggle('long', s > 300);
+    }
+    // Refresh the Status pill from each snapshot so a row that's currently
+    // ringing flips to "answered" the moment Asterisk transitions the
+    // channel state to Up. Without this an existing row would keep its
+    // initial state forever.
+    //
+    // delight: when the state ACTUALLY changes (ringing → answered,
+    // connecting → ringing, etc.), tag the freshly-rendered pill with
+    // .pill-pulse so the CSS keyframe runs once. We cache the previous
+    // state in a tr data-attribute (DOM-local, no JS map). Same-state
+    // ticks don't pulse so a long ringing call doesn't flash forever.
+    var stateCell = tr.querySelector('.state-cell');
+    if (stateCell){
+      var prevState = tr.dataset.lastState || '';
+      var newState  = c.state || '';
+      stateCell.innerHTML = stateCellHTML(newState);
+      if (prevState && prevState !== newState){
+        var newPill = stateCell.querySelector('.pill');
+        if (newPill){
+          newPill.classList.add('pill-pulse');
+          // Strip the class after the animation so subsequent renders
+          // that don't trigger a pulse don't carry stale animation state.
+          setTimeout(function(){ newPill.classList.remove('pill-pulse'); }, 480);
+        }
+      }
+      tr.dataset.lastState = newState;
+    }
+  });
+
+  // Drop rows for calls no longer in the snapshot. Only iterates data
+  // rows (we built `existing` from tr[data-call-id]), so the empty-row
+  // placeholder is left alone.
+  Object.keys(existing).forEach(function(callID){
+    if (!seen[callID]) existing[callID].remove();
+  });
+
+  // Toggle the empty-state placeholder based on data-row count.
+  if (emptyRow){
+    var hasRows = tbody.querySelectorAll('tr[data-call-id]').length > 0;
+    emptyRow.style.display = hasRows ? 'none' : '';
+  }
+}
+
+// stateCellHTML mirrors the server template's State-pill logic so SSE-rendered
+// rows look identical to the initial server-rendered ones. Kept as a separate
+// helper because renderRows also calls it to refresh state on existing rows
+// without rebuilding the whole row HTML.
+function stateCellHTML(state){
+  if (state === 'answered')    return '<span class="pill pill-active">answered</span>';
+  if (state === 'ringing')     return '<span class="pill pill-warn">ringing</span>';
+  if (state === 'connecting')  return '<span class="pill pill-warn">connecting</span>';
+  if (state)                   return '<span class="pill pill-warn">'+escapeHTML(state)+'</span>';
+  return '<span class="muted">—</span>';
+}
+
+function rowHTML(c){
+  // Match the server-rendered template: link the e164 to its CDR-history
+  // page when did_id is known; otherwise plain <code>. Keeps the SSE-
+  // updated rows visually identical to the initial server-rendered ones.
+  var didCell;
+  if (!c.e164){
+    didCell = '<span class="muted">—</span>';
+  } else if (c.did_id){
+    didCell = '<a class="link" href="/dids/'+c.did_id+'/cdrs"><code>'+escapeHTML(c.e164)+'</code></a>';
+  } else {
+    didCell = '<code>'+escapeHTML(c.e164)+'</code>';
+  }
+  if (c.did_type){
+    didCell += ' <span class="subtext">· '+escapeHTML(c.did_type)+' · '+escapeHTML(c.country||'')+'</span>';
+  }
+  if (c.last_admin_action) {
+    didCell += ' <span class="pill pill-warn" style="margin-left:.4em" title="admin '+escapeAttr(c.last_admin_action)+' mid-call">↪ '+escapeHTML(c.last_admin_action)+'</span>';
+  }
+  var customerCell;
+  if (c.reserved){
+    customerCell = '<span class="pill pill-warn">reserved DID</span>';
+  } else if (c.user_id){
+    customerCell = '<a class="link" href="/users/'+c.user_id+'">'+escapeHTML(c.user_ref || ('#'+c.user_id))+'</a>';
+    if (c.reseller_id){
+      customerCell += ' <span class="subtext">· <a class="link" href="/resellers/'+c.reseller_id+'">'+escapeHTML(c.reseller)+'</a></span>';
+    }
+  } else {
+    customerCell = '<span class="muted">—</span>';
+  }
+  var routeCell = c.route_target
+      ? '<span class="route-kind">'+escapeHTML(c.route_kind||'')+'</span> <code>'+escapeHTML(c.route_target)+'</code>'
+      : '<span class="muted">—</span>';
+  return '' +
+    '<td class="muted" style="font-variant-numeric:tabular-nums">'+escapeHTML(c.started_at_utc)+'</td>' +
+    '<td class="age-cell" data-started="'+c.started_at_unix+'">—</td>' +
+    '<td class="state-cell">'+stateCellHTML(c.state)+'</td>' +
+    '<td>'+didCell+'</td>' +
+    '<td>'+customerCell+'</td>' +
+    '<td>'+(c.src_uri_bare ? '<code>'+escapeHTML(c.src_uri_bare)+'</code>' : '<span class="muted">—</span>')+'</td>' +
+    '<td class="muted">'+routeCell+'</td>' +
+    '<td class="muted"><code>'+escapeHTML(c.src_ip)+'</code></td>' +
+    '<td class="muted" style="max-width:240px"><code>'+escapeHTML(c.call_id)+'</code></td>' +
+    '<td class="live-actions">' +
+      '<button class="btn-secondary" onclick="openRedirectModal(\''+escapeAttr(c.call_id)+'\',\''+escapeAttr(c.e164||'')+'\',\''+escapeAttr(c.user_ref||'—')+'\')" title="Move the call to a new destination">'+ICON_REDIRECT+'Redirect</button>' +
+      '<button class="btn-danger" onclick="openHangupModal(\''+escapeAttr(c.call_id)+'\',\''+escapeAttr(c.e164||'')+'\',\''+escapeAttr(c.user_ref||'—')+'\')">'+ICON_X+'Hangup</button>' +
+    '</td>';
+}
+
+function fmtAge(s){
+  if (s < 0) s = 0;
+  if (s < 60)   return s+'s';
+  if (s < 3600) return Math.floor(s/60)+'m '+(s%60)+'s';
+  return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
+}
+
+// Tick existing age cells every second so duration stays smooth between
+// snapshots from the server.
+setInterval(function(){
+  document.querySelectorAll('.age-cell[data-started]').forEach(function(el){
+    var started = parseInt(el.dataset.started, 10);
+    if (!started) return;
+    var s = Math.floor(Date.now()/1000) - started;
+    el.textContent = fmtAge(s);
+    el.classList.toggle('long', s > 300);
+  });
+}, 1000);
+
+function escapeHTML(s){
+  return String(s||'').replace(/[&<>"']/g, function(c){
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+  });
+}
+function escapeAttr(s){ return String(s||'').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+
+connectLiveStream();
+</script>
+{{end}}
