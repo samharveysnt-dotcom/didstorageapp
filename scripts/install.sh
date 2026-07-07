@@ -69,15 +69,21 @@ fi
 ok "PUBLIC_IP=${PUBLIC_IP}"
 
 # ─────────────────────────────────────────────────────────────
-# Step 3 — Install prerequisites (git first so we can clone)
+# Step 3 — Install prerequisites (git first so we can clone;
+# sudo + openssh-server because bootstrap.sh is an SSH-based
+# deployer that shells out through sudo on the target box —
+# minimal netinstalls of Debian ship with neither)
 # ─────────────────────────────────────────────────────────────
-step "Install prerequisites: git, golang, tar, ca-certificates"
+step "Install prerequisites: git, golang, tar, ca-certificates, sudo, openssh-server"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq git golang-go tar ca-certificates >/dev/null
+apt-get install -y -qq git golang-go tar ca-certificates sudo openssh-server >/dev/null
+systemctl enable --now ssh >/dev/null 2>&1 || systemctl enable --now sshd >/dev/null 2>&1 || true
 ok "$(go version 2>/dev/null || echo 'go missing')"
 ok "$(git --version)"
+ok "$(sudo --version | head -1)"
+ok "sshd active: $(systemctl is-active ssh 2>/dev/null || systemctl is-active sshd 2>/dev/null || echo unknown)"
 
 # ─────────────────────────────────────────────────────────────
 # Step 4 — Get the source (git clone or reuse existing checkout)
