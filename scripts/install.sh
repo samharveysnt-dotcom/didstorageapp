@@ -157,51 +157,72 @@ fi
 # ─────────────────────────────────────────────────────────────
 step "SSH-to-localhost trust (so bootstrap.sh can drive install stages)"
 
-mkdir -p /root/.ssh
-chmod 700 /root/.ssh
+# Print progress on every substep so a silent exit points at a specific line.
+set +e  # temporarily lift `set -e` so we can inspect return codes ourselves
+mkdir -p /root/.ssh && chmod 700 /root/.ssh
+ok "mkdir /root/.ssh (rc=$?)"
 
 if [[ ! -f /root/.ssh/id_ed25519 ]]; then
-  ssh-keygen -t ed25519 -N '' -f /root/.ssh/id_ed25519 -C "didstorage-install@$(hostname)" >/dev/null
-  ok "generated root SSH key"
+  ssh-keygen -t ed25519 -N '' -f /root/.ssh/id_ed25519 -C "didstorage-install@$(hostname)"
+  ok "generated root SSH key (rc=$?)"
+else
+  ok "reused existing /root/.ssh/id_ed25519"
 fi
 
+# Ensure the pub file exists — if only the private key survived from an
+# earlier run, ssh-keygen -y rebuilds the pub from it.
+if [[ ! -f /root/.ssh/id_ed25519.pub ]]; then
+  ssh-keygen -y -f /root/.ssh/id_ed25519 > /root/.ssh/id_ed25519.pub
+  chmod 600 /root/.ssh/id_ed25519.pub
+  ok "recreated /root/.ssh/id_ed25519.pub from private key"
+fi
+
+touch /root/.ssh/authorized_keys
 if ! grep -qxFf /root/.ssh/id_ed25519.pub /root/.ssh/authorized_keys 2>/dev/null; then
   cat /root/.ssh/id_ed25519.pub >> /root/.ssh/authorized_keys
   ok "authorised own key on localhost"
+else
+  ok "own key already in authorized_keys"
 fi
 chmod 600 /root/.ssh/authorized_keys
+set -e  # restore
 
 touch /root/.ssh/known_hosts
 chmod 600 /root/.ssh/known_hosts
-# Pre-seed known_hosts so ssh doesn't prompt "authenticity of host ..." on
-# the first connect. Wrap in `|| true` because ssh-keyscan under `set -e -o
-# pipefail` will silently exit the whole script if the daemon isn't up yet
-# on this VM's first-boot timing.
-for h in localhost 127.0.0.1; do
-  keyscan_out="$(ssh-keyscan -H -T 5 "$h" 2>/dev/null || true)"
-  if [[ -n "$keyscan_out" ]]; then
-    while IFS= read -r line; do
-      grep -qxF "$line" /root/.ssh/known_hosts 2>/dev/null || echo "$line" >> /root/.ssh/known_hosts
-    done <<<"$keyscan_out"
-  fi
-done
+ok "touch/chmod known_hosts done"
 
-# Bypass strict host key checking on this first probe — if sshd hasn't yet
-# published a host key (or ssh-keyscan couldn't reach it), the connection
-# would otherwise fail here even when the key auth would work.
-if ! ssh -i /root/.ssh/id_ed25519 \
+# Skip ssh-keyscan entirely — we use StrictHostKeyChecking=accept-new on
+# the probe which achieves the same "trust on first use" outcome without
+# a fragile pipeline that can pipefail-exit the whole installer silently.
+ok "will accept host key on first connect (StrictHostKeyChecking=accept-new)"
+
+ok "about to test ssh root@127.0.0.1 …"
+
+# Redirect stdin from /dev/null so ssh doesn't try to consume the piped
+# install.sh stream (curl|bash leaves the script bytes on stdin — ssh
+# would forward them to the remote or hang). set +e so a failed probe
+# doesn't silently kill the installer; we handle rc ourselves.
+set +e
+ssh -i /root/.ssh/id_ed25519 \
+    -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 \
+    -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts \
+    root@127.0.0.1 'echo ok' </dev/null >/tmp/ssh-probe.out 2>/tmp/ssh-probe.err
+rc=$?
+set -e
+if [[ $rc -ne 0 ]]; then
+  warn "first ssh probe failed (rc=$rc), waiting 3s and retrying with verbose output"
+  cat /tmp/ssh-probe.err >&2 || true
+  systemctl is-active ssh >/dev/null 2>&1 || systemctl start ssh 2>/dev/null || true
+  sleep 3
+  set +e
+  ssh -v -i /root/.ssh/id_ed25519 \
       -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 \
       -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts \
-      root@127.0.0.1 'echo ok' >/dev/null 2>&1; then
-  # Give sshd a moment in case it was mid-restart, then retry once with
-  # verbose output so the operator sees why it failed.
-  systemctl is-active ssh >/dev/null 2>&1 || systemctl start ssh || true
-  sleep 2
-  if ! ssh -i /root/.ssh/id_ed25519 \
-        -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=5 \
-        -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/root/.ssh/known_hosts \
-        root@127.0.0.1 'echo ok'; then
-    die "ssh root@127.0.0.1 with the just-generated key still doesn't work. Check 'systemctl status ssh' and 'journalctl -u ssh -n 40'."
+      root@127.0.0.1 'echo ok' </dev/null
+  rc2=$?
+  set -e
+  if [[ $rc2 -ne 0 ]]; then
+    die "ssh root@127.0.0.1 still failing (rc=$rc2). See verbose output above."
   fi
 fi
 ok "ssh root@127.0.0.1 works"
