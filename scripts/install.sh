@@ -216,7 +216,12 @@ step "Running bootstrap.sh against 127.0.0.1 (~10-15 min, mostly the Asterisk so
 cd "$BUILD_DIR"
 export PUBLIC_IP
 export SSH_KEY=/root/.ssh/id_ed25519
-bash scripts/bootstrap.sh root@127.0.0.1 --yes
+# --skip-ssh-hardening keeps password auth ON. Reason: the on-box installer
+# has no way to know the operator's real public key (they might be running
+# it from a hosting-panel console, not SSH), so locking to key-only would
+# risk permanently locking them out. The final banner nudges them to
+# harden manually once they've added their key.
+bash scripts/bootstrap.sh root@127.0.0.1 --yes --skip-ssh-hardening
 
 # ─────────────────────────────────────────────────────────────
 # Step 7 — Final banner
@@ -233,4 +238,15 @@ echo "  /setup disappears the moment the first admin exists."
 echo
 echo "  ${DIM}Source lives at:  ${SRC_DIR}${RESET}"
 echo "  ${DIM}Redeploy new commits:  cd ${SRC_DIR} && git pull && bash scripts/install.sh${RESET}"
+echo
+echo "  ${YELLOW}${BOLD}Security note:${RESET} SSH still allows password auth (so you"
+echo "  don't get locked out from a fresh install). Once you've copied your"
+echo "  public key into /root/.ssh/authorized_keys and verified you can"
+echo "  ssh in with it, lock the box down with:"
+echo
+echo "    ${BOLD}bash ${SRC_DIR}/scripts/bootstrap.sh root@127.0.0.1 --yes${RESET}"
+echo
+echo "  (same bootstrap, but this time without --skip-ssh-hardening — it"
+echo "  refuses to run if /root/.ssh/authorized_keys is empty, so it can't"
+echo "  lock you out.)"
 echo

@@ -80,6 +80,7 @@ DRY_RUN=0
 ASSUME_YES=0
 SKIP_FIREWALL=0
 SKIP_ASTERISK=0
+SKIP_SSH_HARDENING=0
 
 # Pass-through flags for deploy.sh.
 DEPLOY_FORWARD=()
@@ -91,14 +92,15 @@ usage() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --skip-firewall) SKIP_FIREWALL=1 ;;
-    --skip-asterisk) SKIP_ASTERISK=1; DEPLOY_FORWARD+=(--skip-asterisk) ;;
-    --dry-run)       DRY_RUN=1;       DEPLOY_FORWARD+=(--dry-run) ;;
-    --yes|-y)        ASSUME_YES=1 ;;
-    --help|-h)       usage ;;
-    --)              shift; break ;;
-    -*)              echo "unknown flag: $1" >&2; usage ;;
-    *)               if [[ -z "$TARGET" ]]; then TARGET="$1"; else echo "unexpected arg: $1" >&2; usage; fi ;;
+    --skip-firewall)      SKIP_FIREWALL=1 ;;
+    --skip-asterisk)      SKIP_ASTERISK=1; DEPLOY_FORWARD+=(--skip-asterisk) ;;
+    --skip-ssh-hardening) SKIP_SSH_HARDENING=1 ;;
+    --dry-run)            DRY_RUN=1;       DEPLOY_FORWARD+=(--dry-run) ;;
+    --yes|-y)             ASSUME_YES=1 ;;
+    --help|-h)            usage ;;
+    --)                   shift; break ;;
+    -*)                   echo "unknown flag: $1" >&2; usage ;;
+    *)                    if [[ -z "$TARGET" ]]; then TARGET="$1"; else echo "unexpected arg: $1" >&2; usage; fi ;;
   esac
   shift
 done
@@ -573,16 +575,21 @@ stage "Install systemd units"
 if (( DRY_RUN )); then
   note "[dry-run] would tar-pipe didapi.service, didbill.service, sip-capture.service"
 else
-  tar -C deploy/central/systemd -czf - didapi.service didbill.service sip-capture.service \
+  # Also ship the didbill.timer so the billing job runs on schedule.
+  tar -C deploy/central/systemd -czf - \
+      didapi.service didbill.service didbill.timer sip-capture.service \
     | "${SSH[@]}" "$TARGET" 'sudo tar -C /etc/systemd/system -xzf - && \
-                             chmod 0644 /etc/systemd/system/{didapi,didbill,sip-capture}.service && \
+                             chmod 0644 /etc/systemd/system/{didapi,didbill,sip-capture}.service /etc/systemd/system/didbill.timer && \
                              systemctl daemon-reload'
-  # sip-capture writes the pcaps that back the CDR sip-trace UI. Enable it
-  # now so it's up from the first call — didapi (Stage 8+) and asterisk
-  # (Stage 10b) are started elsewhere.
-  remote 'sudo systemctl enable --now sip-capture' >/dev/null 2>&1 || warn "could not enable sip-capture"
+  # Enable everything so it survives reboot. sip-capture starts now (writes
+  # the pcaps that back the CDR sip-trace UI); didapi and didbill.timer are
+  # marked enabled but not started here — deploy.sh (Stage [08]) starts
+  # didapi after the binary is in place, and didbill.timer needs no
+  # explicit start (systemd runs it on schedule once enabled).
+  remote 'sudo systemctl enable didapi didbill.timer sip-capture && sudo systemctl start sip-capture' \
+    >/dev/null 2>&1 || warn "could not enable one of didapi / didbill.timer / sip-capture"
 fi
-ok "didapi.service + didbill.service + sip-capture.service installed"
+ok "didapi.service + didbill.service + didbill.timer + sip-capture.service installed and enabled"
 
 # ─────────────────────────────────────────────────────────────
 # Stage 8 — Base Asterisk configs
@@ -687,8 +694,15 @@ fi
 # flag — both are "hardening" steps an offline test wants to bypass).
 # ─────────────────────────────────────────────────────────────
 
-if (( SKIP_FIREWALL )); then
-  stage "SSH key-only auth (skipped via --skip-firewall)"
+if (( SKIP_FIREWALL || SKIP_SSH_HARDENING )); then
+  if (( SKIP_SSH_HARDENING )); then
+    stage "SSH key-only auth (skipped via --skip-ssh-hardening)"
+    warn "Password auth remains ENABLED. Add your public key to /root/.ssh/authorized_keys"
+    warn "then run:  rm /etc/ssh/sshd_config.d/00-didstorage-hardening.conf 2>/dev/null; sshd -t && systemctl reload ssh"
+    warn "or re-run bootstrap.sh without --skip-ssh-hardening."
+  else
+    stage "SSH key-only auth (skipped via --skip-firewall)"
+  fi
 else
   stage "Lock SSH to key-only auth"
   if remote_script <<'SSH_EOF'
