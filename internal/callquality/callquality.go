@@ -261,10 +261,23 @@ func parseRTPStreams(out []byte) []Stream {
 
 // parseStreamLine turns one row of the RTP-streams table into a Stream.
 // Returns nil on rows we don't recognise (blank, banner, error text).
+//
+// Real tshark 4.x row shape (whitespace-separated):
+//
+//	<startT> <endT> <srcIP> <srcPort> <dstIP> <dstPort> <SSRC> <payload…>
+//	  <pkts> <lost> "(X.X%)" <min-delta> <mean-delta> <max-delta>
+//	  <min-jitter> <mean-jitter> <max-jitter> [X]
+//
+// The "(X.X%)" token is tshark's parenthesised loss-percentage AFTER the
+// Lost integer — it's a second whitespace token, not part of the number.
+// Older builds omit the min-delta and min-jitter columns, giving:
+//
+//	<startT> <endT> ... <ssrc> <payload…> <pkts> <lost> "(X.X%)"
+//	  <mean-delta> <max-delta> <mean-jitter> <max-jitter> [X]
+//
+// Strip the "(X.X%)" token first, then everything after "lost" is purely
+// numeric (5–8 fields) and we can key off the count.
 func parseStreamLine(f []string) *Stream {
-	// Rough shape: [startT, endT, srcIP, srcPort, dstIP, dstPort, SSRC,
-	//               payload… (variable words), pkts, lost, delta cols,
-	//               jitter cols, "X"?]
 	if len(f) < 10 {
 		return nil
 	}
@@ -276,61 +289,86 @@ func parseStreamLine(f []string) *Stream {
 		f = f[:len(f)-1]
 	}
 
+	// Drop the parenthesised loss-percentage token (e.g. "(0.4%)"). It's
+	// redundant — we recompute LossPercent from Packets+Lost ourselves —
+	// and its presence would shift every downstream numeric column by one.
+	// Preserve everything else.
+	cleaned := make([]string, 0, len(f))
+	for _, t := range f {
+		if strings.HasPrefix(t, "(") && strings.HasSuffix(t, "%)") {
+			continue
+		}
+		cleaned = append(cleaned, t)
+	}
+	f = cleaned
+	if len(f) < 10 {
+		return nil
+	}
+
 	s := &Stream{
 		SrcAddr: f[2] + ":" + f[3],
 		DstAddr: f[4] + ":" + f[5],
 		SSRC:    f[6],
 	}
 
-	// The payload label can be one or two words ("PCMU" vs "ITU-T G.711 PCMU").
-	// The tail after payload is a fixed set of numeric columns, whose count
-	// varies by tshark version. We probe: try 8 (with min cols), then 6.
+	// Payload label may span 1–4 whitespace tokens ("PCMU" · "g711U" ·
+	// "ITU-T G.711 PCMU"). The tail is 5–8 purely-numeric columns:
+	//   8: pkts lost min-delta mean-delta max-delta min-jitter mean-jitter max-jitter
+	//   6: pkts lost mean-delta max-delta mean-jitter max-jitter
+	//   5: pkts lost max-delta mean-jitter max-jitter
+	//
+	// Find the split by walking from the right, counting how many trailing
+	// tokens are numeric. Everything before that is payload.
 	parseNum := func(x string) (float64, bool) {
-		// Strip common decorators ("ms", "%", "(", ")").
 		x = strings.TrimSpace(x)
 		x = strings.TrimSuffix(x, "ms")
-		x = strings.TrimSuffix(x, "%")
-		x = strings.Trim(x, "()")
 		v, err := strconv.ParseFloat(x, 64)
 		return v, err == nil
 	}
-	tryTail := func(n int) bool {
-		if len(f) < 7+n {
-			return false
+	numericTail := 0
+	for i := len(f) - 1; i >= 7; i-- {
+		if _, ok := parseNum(f[i]); !ok {
+			break
 		}
-		nums := make([]float64, n)
-		for i := 0; i < n; i++ {
-			v, ok := parseNum(f[len(f)-n+i])
-			if !ok {
-				return false
-			}
-			nums[i] = v
-		}
-		s.PayloadType = strings.Join(f[7:len(f)-n], " ")
-		switch n {
-		case 8: // pkts lost mind meand maxd minj meanj maxj
-			s.Packets = int(nums[0])
-			s.Lost = int(nums[1])
-			s.MaxDeltaMs = nums[4]
-			s.MeanJitterMs = nums[6]
-			s.MaxJitterMs = nums[7]
-		case 6: // pkts lost meand maxd meanj maxj
-			s.Packets = int(nums[0])
-			s.Lost = int(nums[1])
-			s.MaxDeltaMs = nums[3]
-			s.MeanJitterMs = nums[4]
-			s.MaxJitterMs = nums[5]
-		case 5: // pkts lost maxd meanj maxj (very old)
-			s.Packets = int(nums[0])
-			s.Lost = int(nums[1])
-			s.MaxDeltaMs = nums[2]
-			s.MeanJitterMs = nums[3]
-			s.MaxJitterMs = nums[4]
-		}
-		return true
+		numericTail++
 	}
-	if !tryTail(8) && !tryTail(6) && !tryTail(5) {
+
+	var n int
+	switch {
+	case numericTail >= 8:
+		n = 8
+	case numericTail >= 6:
+		n = 6
+	case numericTail >= 5:
+		n = 5
+	default:
 		return nil
+	}
+	nums := make([]float64, n)
+	base := len(f) - n
+	for i := 0; i < n; i++ {
+		nums[i], _ = parseNum(f[base+i])
+	}
+	s.PayloadType = strings.Join(f[7:base], " ")
+	switch n {
+	case 8: // pkts lost mind meand maxd minj meanj maxj
+		s.Packets = int(nums[0])
+		s.Lost = int(nums[1])
+		s.MaxDeltaMs = nums[4]
+		s.MeanJitterMs = nums[6]
+		s.MaxJitterMs = nums[7]
+	case 6: // pkts lost meand maxd meanj maxj
+		s.Packets = int(nums[0])
+		s.Lost = int(nums[1])
+		s.MaxDeltaMs = nums[3]
+		s.MeanJitterMs = nums[4]
+		s.MaxJitterMs = nums[5]
+	case 5: // pkts lost maxd meanj maxj
+		s.Packets = int(nums[0])
+		s.Lost = int(nums[1])
+		s.MaxDeltaMs = nums[2]
+		s.MeanJitterMs = nums[3]
+		s.MaxJitterMs = nums[4]
 	}
 
 	if s.Packets+s.Lost > 0 {
