@@ -70,6 +70,8 @@
   .q-swatch{display:inline-block;width:.7rem;height:.7rem;border-radius:3px;vertical-align:middle;margin:0 .1rem 0 .35rem}
   .q-swatch.q-warn{background:#d69529}
   .q-swatch.q-bad {background:#dc3f45}
+  .q-muted-cell{color:var(--muted);opacity:.65}
+  .q-cn-note{display:inline-block;margin-top:.25rem;font:11px ui-sans-serif,system-ui;color:var(--muted);max-width:34ch;line-height:1.4}
 
   /* ===== Auto-diagnosis banner ===== */
   .diag{display:flex;flex-direction:column;gap:.45rem;margin:0 0 1rem}
@@ -509,20 +511,29 @@
         </thead>
         <tbody>
           {{range .Streams}}
-          <tr class="{{if .Problems}}q-row-flag{{end}}">
+          <tr class="{{if .Problems}}q-row-flag{{end}}"{{if .TimingUnreliable}} title="{{.TimingNote}}"{{end}}>
             <td>
               {{if eq .Direction "in"}}<span class="q-dir in">⇢ in</span>
               {{else if eq .Direction "out"}}<span class="q-dir out">⇠ out</span>
               {{else}}<span class="q-dir">·</span>{{end}}
             </td>
             <td class="mono">{{.SrcAddr}} → {{.DstAddr}}<br><span class="muted">SSRC {{.SSRC}}</span></td>
-            <td>{{if .PayloadType}}{{.PayloadType}}{{else}}<span class="muted">—</span>{{end}}</td>
+            <td>
+              {{if .PayloadType}}{{.PayloadType}}{{else}}<span class="muted">—</span>{{end}}
+              {{if .TimingUnreliable}}<br><span class="q-cn-note">⚠ {{.TimingNote}}</span>{{end}}
+            </td>
             <td class="num">{{.Packets}}</td>
             <td class="num {{if gt .Lost 0}}q-warn{{end}}">{{.Lost}}</td>
             <td class="num {{if ge .LossPercent 1.0}}q-bad{{else if gt .LossPercent 0.0}}q-warn{{end}}">{{printf "%.2f" .LossPercent}}</td>
-            <td class="num {{if ge .MaxDeltaMs 100.0}}q-bad{{else if ge .MaxDeltaMs 60.0}}q-warn{{end}}">{{printf "%.0f" .MaxDeltaMs}}</td>
-            <td class="num {{if ge .MeanJitterMs 30.0}}q-bad{{else if ge .MeanJitterMs 20.0}}q-warn{{end}}">{{printf "%.1f" .MeanJitterMs}}</td>
-            <td class="num {{if ge .MaxJitterMs 100.0}}q-bad{{else if ge .MaxJitterMs 50.0}}q-warn{{end}}">{{printf "%.1f" .MaxJitterMs}}</td>
+            {{if .TimingUnreliable}}
+              <td class="num q-muted-cell">{{printf "%.0f" .MaxDeltaMs}}</td>
+              <td class="num q-muted-cell">{{printf "%.1f" .MeanJitterMs}}</td>
+              <td class="num q-muted-cell">{{printf "%.1f" .MaxJitterMs}}</td>
+            {{else}}
+              <td class="num {{if ge .MaxDeltaMs 100.0}}q-bad{{else if ge .MaxDeltaMs 60.0}}q-warn{{end}}">{{printf "%.0f" .MaxDeltaMs}}</td>
+              <td class="num {{if ge .MeanJitterMs 30.0}}q-bad{{else if ge .MeanJitterMs 20.0}}q-warn{{end}}">{{printf "%.1f" .MeanJitterMs}}</td>
+              <td class="num {{if ge .MaxJitterMs 100.0}}q-bad{{else if ge .MaxJitterMs 50.0}}q-warn{{end}}">{{printf "%.1f" .MaxJitterMs}}</td>
+            {{end}}
           </tr>
           {{end}}
         </tbody>

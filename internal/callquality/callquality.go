@@ -66,8 +66,22 @@ type Stream struct {
 	MaxDeltaMs   float64 `json:"max_delta_ms"`   // biggest gap between two arrivals
 	MeanJitterMs float64 `json:"mean_jitter_ms"` // RFC 3550 interarrival jitter avg
 	MaxJitterMs  float64 `json:"max_jitter_ms"`
-	Problems     bool    `json:"problems"` // tshark's own X flag
+	Problems     bool    `json:"problems"`  // tshark's own X flag
 	Direction    string  `json:"direction"` // "in" (they→us) / "out" (us→them) / "?"
+
+	// TimingUnreliable is true when tshark's jitter / max-delta numbers on
+	// this stream can't be trusted at face value. Set when the payload
+	// column contains Comfort Noise (RFC 3389, PT=13) or two comma-separated
+	// codec names — both cases confuse tshark's inter-arrival-time
+	// accumulator. Silence packets in DTX / CN streams arrive irregularly by
+	// design, so a jitter buffer isn't refilling; a codec transition resets
+	// the RTP timestamp base but tshark keeps computing from the old one, so
+	// the accumulator explodes into multi-minute nonsense values.
+	//
+	// When true, the verdict logic skips this stream's jitter and max-delta
+	// contributions — packet loss remains a valid signal.
+	TimingUnreliable bool   `json:"timing_unreliable"`
+	TimingNote       string `json:"timing_note,omitempty"`
 }
 
 // Verdict rolls all streams up into one label the GUI can badge.
@@ -375,7 +389,70 @@ func parseStreamLine(f []string) *Stream {
 		s.LossPercent = float64(s.Lost) / float64(s.Packets+s.Lost) * 100.0
 	}
 	s.Problems = problems
+	classifyPayload(s)
 	return s
+}
+
+// classifyPayload decides whether the stream's jitter/max-delta numbers are
+// trustworthy. Two cases zero-rated for verdict purposes:
+//
+//  1. Comfort Noise (RFC 3389, PT=13, appears as "CN" in the payload
+//     column). CN packets are only sent during silence periods and arrive
+//     at irregular intervals by design. tshark's jitter formula assumes
+//     fixed-rate arrival, so the mixing of CN and audio packets produces
+//     multi-minute nonsense jitter and 200-800ms fake "max gaps" that are
+//     really just silence.
+//  2. Payload transitions mid-stream (comma-separated payload names such
+//     as "g711U, g711A"). Each codec has its own RTP timestamp base;
+//     tshark keeps accumulating deltas across the transition, so jitter
+//     appears to spike enormously at the switch.
+//
+// Silence-suppression bursts also inflate MaxDeltaMs beyond any real
+// concern, so we clear that field too when Timing is unreliable.
+func classifyPayload(s *Stream) {
+	p := strings.ToUpper(strings.ReplaceAll(s.PayloadType, " ", ""))
+	// Comma-separated payload names (codec change mid-stream).
+	if strings.Contains(p, ",") {
+		names := strings.Split(p, ",")
+		distinct := map[string]bool{}
+		for _, n := range names {
+			n = strings.TrimSpace(n)
+			if n != "" {
+				distinct[n] = true
+			}
+		}
+		if len(distinct) > 1 {
+			// Only unreliable when the codecs actually differ. CN mixed with
+			// audio is the common trigger and is caught below anyway.
+			hasCN := false
+			for n := range distinct {
+				if n == "CN" || strings.HasSuffix(n, "-CN") {
+					hasCN = true
+				}
+			}
+			if hasCN {
+				s.TimingUnreliable = true
+				s.TimingNote = "Comfort Noise (silence suppression) mixed with audio — jitter and max-gap numbers are not comparable across the CN transitions."
+			} else {
+				s.TimingUnreliable = true
+				s.TimingNote = "Codec change mid-stream (" + s.PayloadType + ") — tshark's jitter accumulator resets across the transition, so the reported values overstate the actual variance."
+			}
+		}
+	}
+	// Standalone CN payload — no audio at all. Not really a media stream.
+	if p == "CN" {
+		s.TimingUnreliable = true
+		s.TimingNote = "Standalone comfort-noise stream (no audio)."
+	}
+	// Sanity ceiling: real jitter for a 30-min call can't exceed a few
+	// hundred ms without the call being unusable. Anything past 500ms mean
+	// or 1000ms max is a tshark accumulator artefact; ignore it.
+	if s.MeanJitterMs > 500 || s.MaxJitterMs > 1000 {
+		s.TimingUnreliable = true
+		if s.TimingNote == "" {
+			s.TimingNote = "Jitter values above 500ms are almost always a tshark accumulator artefact (payload transition or SSRC wrap), not a real network condition."
+		}
+	}
 }
 
 // deriveVerdict rolls per-stream stats into an overall Level and a bulleted
@@ -407,8 +484,9 @@ func deriveVerdict(streams []Stream) Verdict {
 		return s.SrcAddr + " → " + s.DstAddr + d
 	}
 
+	sawUnreliable := false
 	for _, s := range streams {
-		// Packet loss.
+		// Packet loss is always a valid signal, regardless of payload type.
 		switch {
 		case s.LossPercent >= 5:
 			set("bad")
@@ -425,6 +503,13 @@ func deriveVerdict(streams []Stream) Verdict {
 			v.Issues = append(v.Issues, fmt.Sprintf(
 				"%s: %.2f%% packet loss (%d/%d) — negligible.",
 				label(s), s.LossPercent, s.Lost, s.Packets+s.Lost))
+		}
+
+		// Skip jitter / max-delta for streams where tshark's numbers can't be
+		// trusted (comfort noise, codec transition, nonsense-magnitude jitter).
+		if s.TimingUnreliable {
+			sawUnreliable = true
+			continue
 		}
 
 		// Max inter-arrival delta. Jitter buffers usually hold 60–100ms; past
@@ -465,6 +550,10 @@ func deriveVerdict(streams []Stream) Verdict {
 				"%s: %.1fms mean jitter — borderline.",
 				label(s), s.MeanJitterMs))
 		}
+	}
+	if sawUnreliable {
+		v.Issues = append(v.Issues,
+			"Note: one or more streams contained Comfort Noise (RFC 3389) or a codec change mid-call. Their jitter / max-gap numbers are inflated by design and were excluded from the verdict — see the per-stream table for the raw values.")
 	}
 
 	// One-way audio detection.
