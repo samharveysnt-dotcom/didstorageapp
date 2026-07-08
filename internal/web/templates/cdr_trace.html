@@ -22,6 +22,55 @@
   .trace-pane{display:none}
   .trace-pane.active{display:block}
 
+  /* ===== Call quality tab ===== */
+  .q-tab-badge{display:inline-block;margin-left:.35rem;padding:1px .5rem;border-radius:10px;font:600 10px ui-sans-serif,system-ui;text-transform:uppercase;letter-spacing:.4px;vertical-align:middle;border:1px solid transparent}
+  .q-tab-badge.q-good      {background:rgba(35,165,90,.14);color:#3ba46b;border-color:rgba(35,165,90,.35)}
+  .q-tab-badge.q-acceptable{background:rgba(240,178,50,.14);color:#d69529;border-color:rgba(240,178,50,.35)}
+  .q-tab-badge.q-poor      {background:rgba(240,178,50,.20);color:#c47a12;border-color:rgba(240,178,50,.50)}
+  .q-tab-badge.q-bad       {background:rgba(218,55,60,.16);color:#dc3f45;border-color:rgba(218,55,60,.45)}
+  .q-tab-badge.q-unknown   {background:rgba(148,155,164,.14);color:var(--muted);border-color:var(--border)}
+
+  .q-verdict{display:flex;gap:1rem;padding:1rem 1.1rem;border:1px solid var(--border);border-radius:10px;background:var(--card);margin-bottom:1rem}
+  .q-verdict.q-good       {border-color:rgba(35,165,90,.4);background:rgba(35,165,90,.06)}
+  .q-verdict.q-acceptable {border-color:rgba(240,178,50,.4);background:rgba(240,178,50,.06)}
+  .q-verdict.q-poor       {border-color:rgba(240,178,50,.55);background:rgba(240,178,50,.10)}
+  .q-verdict.q-bad        {border-color:rgba(218,55,60,.5);background:rgba(218,55,60,.10)}
+  .q-verdict.q-unknown    {border-color:var(--border)}
+
+  .q-verdict-badge{flex:0 0 auto;align-self:flex-start;padding:.4rem .8rem;border-radius:8px;font:700 12px ui-sans-serif,system-ui;text-transform:uppercase;letter-spacing:.6px;color:#fff}
+  .q-verdict.q-good       .q-verdict-badge{background:#23a55a}
+  .q-verdict.q-acceptable .q-verdict-badge{background:#d69529}
+  .q-verdict.q-poor       .q-verdict-badge{background:#c26a13}
+  .q-verdict.q-bad        .q-verdict-badge{background:#da373c}
+  .q-verdict.q-unknown    .q-verdict-badge{background:#5c6370}
+
+  .q-verdict-body{flex:1;min-width:0}
+  .q-verdict-summary{font-size:13.5px;color:var(--text);font-weight:500;line-height:1.45}
+  .q-issues{margin:.55rem 0 0;padding-left:1.15rem;color:var(--muted);font-size:12.5px;line-height:1.55}
+  .q-issues li{margin-bottom:.25rem}
+
+  .q-hint{padding:.85rem 1rem;border:1px solid var(--border);border-radius:8px;background:rgba(88,101,242,.06);margin-bottom:1rem;font-size:12.5px;line-height:1.55;color:var(--text)}
+  .q-hint pre{margin:.4rem 0 0;padding:.4rem .6rem;background:#1e1f22;border:1px solid var(--border);border-radius:5px;font:12px ui-monospace,Menlo,monospace;color:var(--accent-text);overflow-x:auto}
+
+  .q-streams-head{font:600 12px ui-sans-serif,system-ui;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:.4rem}
+  .q-table-wrap{border:1px solid var(--border);border-radius:8px;background:var(--card);overflow-x:auto}
+  .q-table{width:100%;border-collapse:collapse;font-size:12.5px}
+  .q-table th,.q-table td{padding:.55rem .7rem;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+  .q-table thead th{background:#1e1f22;color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.7px;border-bottom:1px solid var(--border)}
+  .q-table tbody tr:last-child td{border-bottom:none}
+  .q-table td.num,.q-table th.num{text-align:right;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace}
+  .q-table .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  .q-table td.q-warn{color:#d69529;font-weight:600}
+  .q-table td.q-bad {color:#dc3f45;font-weight:600}
+  .q-table tr.q-row-flag{background:rgba(218,55,60,.05)}
+  .q-dir{display:inline-block;padding:1px .45rem;border-radius:4px;font:600 11px ui-monospace,Menlo,monospace;background:#1e1f22;border:1px solid var(--border);color:var(--muted)}
+  .q-dir.in {color:var(--accent-text);border-color:rgba(88,101,242,.4)}
+  .q-dir.out{color:#3ba46b;border-color:rgba(35,165,90,.4)}
+  .q-thresh{margin-top:.55rem;font-size:11.5px;line-height:1.6}
+  .q-swatch{display:inline-block;width:.7rem;height:.7rem;border-radius:3px;vertical-align:middle;margin:0 .1rem 0 .35rem}
+  .q-swatch.q-warn{background:#d69529}
+  .q-swatch.q-bad {background:#dc3f45}
+
   /* ===== Auto-diagnosis banner ===== */
   .diag{display:flex;flex-direction:column;gap:.45rem;margin:0 0 1rem}
   .diag-card{display:flex;gap:.7rem;padding:.7rem .9rem;border-radius:8px;border:1px solid var(--border);background:var(--card);align-items:flex-start}
@@ -223,6 +272,7 @@
 <div class="trace-tabs" id="trace-tabs">
   <a data-tab="overview" class="active" onclick="showTraceTab(event,'overview')">Overview</a>
   <a data-tab="timeline" onclick="showTraceTab(event,'timeline')">Message Timeline ({{len .Trace.Messages}})</a>
+  <a data-tab="quality"  onclick="showTraceTab(event,'quality')">Call Quality{{with .Quality}} <span class="q-tab-badge q-{{.Verdict.Level}}">{{.Verdict.Level}}</span>{{end}}</a>
   <a data-tab="raw"      onclick="showTraceTab(event,'raw')">Raw Dump</a>
 </div>
 
@@ -414,6 +464,83 @@
 </div>
 
 <!-- ============================================================ Raw -->
+<!-- ============================================================ Call quality -->
+<div class="trace-pane" data-tab="quality">
+  {{with .Quality}}
+  <div class="q-verdict q-{{.Verdict.Level}}">
+    <div class="q-verdict-badge">{{.Verdict.Level}}</div>
+    <div class="q-verdict-body">
+      <div class="q-verdict-summary">{{.Verdict.Summary}}</div>
+      {{if .Verdict.Issues}}
+      <ul class="q-issues">
+        {{range .Verdict.Issues}}<li>{{.}}</li>{{end}}
+      </ul>
+      {{end}}
+    </div>
+  </div>
+
+  {{if .NoRTPCaptured}}
+  <div class="q-hint">
+    <strong>No RTP media in the capture.</strong>
+    If you can hear audio on the call, the pcap filter isn't watching Asterisk's RTP port range.
+    Confirm <code>sip-capture.service</code> is capturing UDP <code>10000-20000</code> alongside <code>5060/5061</code>:
+    <pre>systemctl cat sip-capture | grep tcpdump</pre>
+    Then <code>systemctl restart sip-capture</code>. New calls placed afterwards will show media metrics here.
+  </div>
+  {{end}}
+
+  {{if .Streams}}
+  <div class="q-streams">
+    <div class="q-streams-head">RTP streams ({{len .Streams}})</div>
+    <div class="q-table-wrap">
+      <table class="q-table">
+        <thead>
+          <tr>
+            <th>Direction</th>
+            <th>Endpoints</th>
+            <th>Payload</th>
+            <th class="num">Packets</th>
+            <th class="num">Lost</th>
+            <th class="num">Loss %</th>
+            <th class="num">Max Δ (ms)</th>
+            <th class="num">Mean jitter (ms)</th>
+            <th class="num">Max jitter (ms)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Streams}}
+          <tr class="{{if .Problems}}q-row-flag{{end}}">
+            <td>
+              {{if eq .Direction "in"}}<span class="q-dir in">⇢ in</span>
+              {{else if eq .Direction "out"}}<span class="q-dir out">⇠ out</span>
+              {{else}}<span class="q-dir">·</span>{{end}}
+            </td>
+            <td class="mono">{{.SrcAddr}} → {{.DstAddr}}<br><span class="muted">SSRC {{.SSRC}}</span></td>
+            <td>{{if .PayloadType}}{{.PayloadType}}{{else}}<span class="muted">—</span>{{end}}</td>
+            <td class="num">{{.Packets}}</td>
+            <td class="num {{if gt .Lost 0}}q-warn{{end}}">{{.Lost}}</td>
+            <td class="num {{if ge .LossPercent 1.0}}q-bad{{else if gt .LossPercent 0.0}}q-warn{{end}}">{{printf "%.2f" .LossPercent}}</td>
+            <td class="num {{if ge .MaxDeltaMs 100.0}}q-bad{{else if ge .MaxDeltaMs 60.0}}q-warn{{end}}">{{printf "%.0f" .MaxDeltaMs}}</td>
+            <td class="num {{if ge .MeanJitterMs 30.0}}q-bad{{else if ge .MeanJitterMs 20.0}}q-warn{{end}}">{{printf "%.1f" .MeanJitterMs}}</td>
+            <td class="num {{if ge .MaxJitterMs 100.0}}q-bad{{else if ge .MaxJitterMs 50.0}}q-warn{{end}}">{{printf "%.1f" .MaxJitterMs}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    <div class="q-thresh muted">
+      Cell colouring:
+      <span class="q-swatch q-warn"></span> borderline,
+      <span class="q-swatch q-bad"></span> likely audible.
+      Thresholds — loss ≥1% poor / ≥5% bad · max Δ ≥60 borderline / ≥100 poor / ≥200 bad · mean jitter ≥20 borderline / ≥30 poor / ≥50 bad.
+    </div>
+  </div>
+  {{end}}
+  {{else}}
+  <p class="muted">Quality analysis unavailable.</p>
+  {{end}}
+</div>
+
 <div class="trace-pane" data-tab="raw">
   {{if .Trace.Raw}}
   <pre class="raw-dump">{{.Trace.Raw}}</pre>

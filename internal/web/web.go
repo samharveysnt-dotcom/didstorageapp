@@ -27,6 +27,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"didstorage/internal/auth"
+	"didstorage/internal/callquality"
 	"didstorage/internal/causes"
 	"didstorage/internal/db"
 	"didstorage/internal/didsimport"
@@ -1572,10 +1573,14 @@ func (h *Handler) cdrSipTrace(w http.ResponseWriter, r *http.Request) {
 		Started, DID, Ref string
 		Billsec, Cents    int
 	}
+	// StartedAt / EndedAt as time.Time bound the RTP window when we ask
+	// callquality to look at the pcaps.
+	var startedAt, endedAt time.Time
 	// LEFT JOIN dids/users so denial-style rows (no order or user link)
 	// still produce a row.
 	err := h.DB.QueryRow(r.Context(), `
 		SELECT c.id, to_char(c.started_at,'YYYY-MM-DD HH24:MI:SS'),
+		       c.started_at, COALESCE(c.ended_at, c.started_at + interval '1 hour'),
 		       COALESCE(d.e164,''),
 		       COALESCE(u.external_id, u.label, u.contact_email, ''),
 		       c.billsec, c.charge_cents
@@ -1584,7 +1589,7 @@ func (h *Handler) cdrSipTrace(w http.ResponseWriter, r *http.Request) {
 		  LEFT JOIN dids   d ON d.id = COALESCE(c.did_id, o.did_id)
 		  LEFT JOIN users  u ON u.id = c.user_id
 		 WHERE c.call_id = $1`, callID,
-	).Scan(&cdrInfo.ID, &cdrInfo.Started, &cdrInfo.DID, &cdrInfo.Ref, &cdrInfo.Billsec, &cdrInfo.Cents)
+	).Scan(&cdrInfo.ID, &cdrInfo.Started, &startedAt, &endedAt, &cdrInfo.DID, &cdrInfo.Ref, &cdrInfo.Billsec, &cdrInfo.Cents)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Maybe it's a denied_calls row (unauthorized_ip / unknown_did) —
 		// they share a call_id namespace and admins still want a trace.
@@ -1653,6 +1658,21 @@ func (h *Handler) cdrSipTrace(w http.ResponseWriter, r *http.Request) {
 	endResult := EndResultLabel(cdrInfo.Billsec, hangupCause, tr.FinalSIPCode, tr.FinalSIPReason, len(tr.Messages) > 0)
 	findings := BuildFindings(tr, hangupCause)
 
+	// Call quality: run tshark's rtp,streams tap on the same pcaps, scoped
+	// to IPs seen in the SIP dialog and the call's time window. Best-effort
+	// — if it errors we still render the trace with an empty quality panel.
+	dialogIPs := make([]string, 0, len(tr.Endpoints))
+	dialogIPs = append(dialogIPs, tr.Endpoints...)
+	qualityCtx, qualityCancel := context.WithTimeout(r.Context(), 20*time.Second)
+	quality, qErr := callquality.Analyze(qualityCtx, h.PublicIP, dialogIPs, startedAt, endedAt)
+	qualityCancel()
+	if qErr != nil {
+		h.Log.Warn("callquality.Analyze", "err", qErr, "call_id", callID)
+		quality = &callquality.Report{
+			Verdict: callquality.Verdict{Level: "unknown", Summary: "Quality analysis failed: " + qErr.Error()},
+		}
+	}
+
 	// Per-message raw frame text — feeds the side panel's "raw" view. JSON-
 	// embedded in the page so JS can pull chunk[i] on arrow click without
 	// another round-trip. Best-effort: if tshark didn't produce 1:1 frame
@@ -1674,6 +1694,7 @@ func (h *Handler) cdrSipTrace(w http.ResponseWriter, r *http.Request) {
 		"Diagram":       diagram,
 		"EndResult":     endResult,
 		"Findings":      findings,
+		"Quality":       quality,
 		"FramesJSON":    template.JS(framesJSON),
 		"MessagesJSON":  template.JS(msgsJSON),
 	})
