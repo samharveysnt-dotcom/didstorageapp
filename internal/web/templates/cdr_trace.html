@@ -248,6 +248,18 @@
     <div class="value" style="font-size:1rem">{{if .CDRInfo.Ref}}<code>{{.CDRInfo.Ref}}</code>{{else}}<span class="muted">—</span>{{end}}</div>
     <div class="sub">customer reference</div>
   </div>
+  <div class="card">
+    <div class="label">Supplier</div>
+    <div class="value" style="font-size:1rem">{{if .CDRInfo.Supplier}}{{.CDRInfo.Supplier}}{{else}}<span class="muted">—</span>{{end}}</div>
+    <div class="sub">where the call arrived from</div>
+  </div>
+  <div class="card">
+    <div class="label">Destination</div>
+    <div class="value" style="font-size:1rem">
+      {{if .CDRInfo.RouteTarget}}{{siptarget .CDRInfo.RouteKind .CDRInfo.RouteTarget}}{{else}}<span class="muted">—</span>{{end}}
+    </div>
+    <div class="sub">where the call was routed to</div>
+  </div>
 </div>
 
 {{/* ===== Auto-diagnosis banner ===== */}}

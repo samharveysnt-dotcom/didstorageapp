@@ -1572,6 +1572,12 @@ func (h *Handler) cdrSipTrace(w http.ResponseWriter, r *http.Request) {
 		ID                int64
 		Started, DID, Ref string
 		Billsec, Cents    int
+		// RouteKind + RouteTarget = where the call was destined
+		// (audio file / SIP peer / forwarded number / IP endpoint).
+		// Falls back to the order's configured route when the CDR row
+		// doesn't have its own routed_kind yet (denial paths).
+		RouteKind, RouteTarget string
+		Supplier               string
 	}
 	// StartedAt / EndedAt as time.Time bound the RTP window when we ask
 	// callquality to look at the pcaps.
@@ -1583,13 +1589,18 @@ func (h *Handler) cdrSipTrace(w http.ResponseWriter, r *http.Request) {
 		       c.started_at, COALESCE(c.ended_at, c.started_at + interval '1 hour'),
 		       COALESCE(d.e164,''),
 		       COALESCE(u.external_id, u.label, u.contact_email, ''),
-		       c.billsec, c.charge_cents
+		       c.billsec, c.charge_cents,
+		       COALESCE(c.routed_kind::text, COALESCE(o.route_kind::text, '')),
+		       COALESCE(c.routed_target,    COALESCE(o.route_target, '')),
+		       COALESCE(s.name, '')
 		  FROM cdrs c
-		  LEFT JOIN orders o ON o.id = c.order_id
-		  LEFT JOIN dids   d ON d.id = COALESCE(c.did_id, o.did_id)
-		  LEFT JOIN users  u ON u.id = c.user_id
+		  LEFT JOIN orders     o ON o.id = c.order_id
+		  LEFT JOIN dids       d ON d.id = COALESCE(c.did_id, o.did_id)
+		  LEFT JOIN users      u ON u.id = c.user_id
+		  LEFT JOIN suppliers  s ON s.id = c.supplier_id
 		 WHERE c.call_id = $1`, callID,
-	).Scan(&cdrInfo.ID, &cdrInfo.Started, &startedAt, &endedAt, &cdrInfo.DID, &cdrInfo.Ref, &cdrInfo.Billsec, &cdrInfo.Cents)
+	).Scan(&cdrInfo.ID, &cdrInfo.Started, &startedAt, &endedAt, &cdrInfo.DID, &cdrInfo.Ref, &cdrInfo.Billsec, &cdrInfo.Cents,
+		&cdrInfo.RouteKind, &cdrInfo.RouteTarget, &cdrInfo.Supplier)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Maybe it's a denied_calls row (unauthorized_ip / unknown_did) —
 		// they share a call_id namespace and admins still want a trace.
