@@ -9,8 +9,15 @@ User=didstorage
 Group=didstorage
 EnvironmentFile=/etc/didstorage/didapi.env
 ExecStart=/opt/didstorage/bin/didapi
-Restart=on-failure
+Restart=always
 RestartSec=2
+# Cgroup memory ceiling. If didapi ever balloons past this (previously seen
+# during bursts of siptrace precomputes spawning many tshark subprocesses),
+# systemd back-pressures instead of letting the kernel OOM-kill it, which
+# gives the process a chance to finish work and exit cleanly. Tune upward
+# on beefier boxes; 1.5G is roomy for typical loads.
+MemoryHigh=1200M
+MemoryMax=1500M
 # Allow binding to ports < 1024 (e.g. :80) without root.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE

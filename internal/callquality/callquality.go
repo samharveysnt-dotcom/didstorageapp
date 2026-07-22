@@ -206,6 +206,16 @@ func splitAddr(a string) (string, string) {
 // tap output. Heuristic RTP dissection is enabled so packets are recognised
 // even when tshark didn't observe the SDP offer/answer.
 func tsharkRTPStreams(ctx context.Context, pcap string, tStart, tEnd int64) ([]Stream, error) {
+	// Share siptrace's global tshark concurrency cap — otherwise burst
+	// trace-page loads or precompute goroutines can OOM didapi by
+	// spawning many concurrent tshark processes against 300-600 MB pcap
+	// files.
+	release, err := siptrace.AcquireTsharkSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 

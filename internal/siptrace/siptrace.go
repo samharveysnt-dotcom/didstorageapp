@@ -43,9 +43,37 @@ import (
 
 const PcapDir = "/var/lib/didstorage/sip-traces"
 
-// Concurrency cap for tshark + grep workers. Empirically 4 keeps a 4-core
-// box pegged without thrashing.
+// Concurrency cap for tshark + grep workers WITHIN a single Lookup call.
+// Multiple Lookup calls in parallel are further throttled by globalTsharkSem
+// below; without that ceiling, a burst of call ends (each firing a
+// precomputeTrace goroutine) can OOM didapi by spawning dozens of tshark
+// processes at once, each holding a 300-600 MB pcap file in memory.
 const maxParallel = 4
+
+// globalTsharkSem is a package-wide semaphore that caps the TOTAL number of
+// concurrent tshark subprocesses across every Lookup / callquality /
+// precomputeTrace caller in the process. Sized to 4 so peak resident memory
+// stays under ~1 GB even with today's ~600 MB pcaps. Additional callers
+// block until a slot frees, which is fine — precompute is best-effort and
+// admin trace-page loads are opportunistic.
+//
+// Buffered channel used as a counting semaphore. Acquire by sending an
+// empty struct; release by receiving. runTshark holds one slot for the
+// entire tshark exec.
+var globalTsharkSem = make(chan struct{}, 4)
+
+// AcquireTsharkSlot blocks until a global tshark concurrency slot is
+// available, then returns a release function. Exported so packages that
+// spawn tshark directly (callquality, etc.) share the same OOM guard as
+// siptrace.Lookup. Cancel via ctx to give up waiting.
+func AcquireTsharkSlot(ctx context.Context) (release func(), err error) {
+	select {
+	case globalTsharkSem <- struct{}{}:
+		return func() { <-globalTsharkSem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 // cacheTTL is how long we keep a parsed Trace in memory. Once a pcap rolls
 // out of retention the call's packets disappear, so caching for the same
@@ -433,6 +461,20 @@ func (tr *Trace) Sanitize(s Sanitization) {
 // reading a live pcap (last packet appears truncated) but earlier packets
 // are valid.
 func runTshark(ctx context.Context, pcap, filter string, extra ...string) ([]byte, error) {
+	// Global process-wide throttle: never let more than N tshark subprocesses
+	// exist concurrently across the whole didapi process. Peak resident
+	// memory per tshark is roughly the pcap file size (300-600 MB today), so
+	// unbounded parallelism was OOM-killing didapi under bursts of
+	// precomputeTrace goroutines. Blocking here is safe — the caller is
+	// either a background precompute (best-effort, latency doesn't matter)
+	// or an admin trace-page load (a few seconds of wait is fine).
+	select {
+	case globalTsharkSem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-globalTsharkSem }()
+
 	args := []string{"-n", "-r", pcap, "-Y", filter}
 	args = append(args, extra...)
 	// Per-pcap timeout. preFilterPcaps already culled empties so this caps
