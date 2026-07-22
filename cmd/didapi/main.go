@@ -177,7 +177,13 @@ func run() error {
 	// subprocess; 30 calls/min is negligible CPU on this box.
 	livecalls.StartReconciler(ctx, rdb, livecalls.ReconcilerOptions{
 		TickInterval: 1 * time.Second,
-		SettleWindow: 3 * time.Second,
+		// No settle window — Asterisk creates the channel BEFORE the AGI
+		// runs (the AGI executes on the channel), so by the time
+		// livecalls.Register completes, `core show channels concise`
+		// already lists the channel. Removing the settle grace makes
+		// this operationally identical to clicking /live "Force cleanup"
+		// every second, which is exactly the mental model we want.
+		SettleWindow: 0,
 		ReleaseReservations: func(ctx context.Context, callIDs []string) error {
 			return livecalls.ReleaseChannelReservations(ctx, rdb, callIDs)
 		},

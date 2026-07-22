@@ -114,7 +114,10 @@ func StartReconciler(ctx context.Context, rdb *redis.Client, opts ReconcilerOpti
 	if opts.TickInterval <= 0 {
 		opts.TickInterval = 15 * time.Second
 	}
-	if opts.SettleWindow <= 0 {
+	// SettleWindow < 0 → default 20s. Exactly 0 is a legitimate caller
+	// choice ("no grace period, sweep everything on every tick") and
+	// must be preserved.
+	if opts.SettleWindow < 0 {
 		opts.SettleWindow = 20 * time.Second
 	}
 	if opts.ChannelSet == nil {
