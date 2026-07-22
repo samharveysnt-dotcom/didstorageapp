@@ -16,8 +16,24 @@ RestartSec=2
 # systemd back-pressures instead of letting the kernel OOM-kill it, which
 # gives the process a chance to finish work and exit cleanly. Tune upward
 # on beefier boxes; 1.5G is roomy for typical loads.
+MemoryAccounting=true
 MemoryHigh=1200M
 MemoryMax=1500M
+# OOM survival:
+#   OOMPolicy=continue → when a child process (e.g. tshark) gets OOM-killed,
+#     don't consider the whole didapi.service failed. Prior behaviour was to
+#     stop the entire service on any child OOM, which took the reconciler
+#     down at exactly the moment ghost rows were being created — the
+#     opposite of what we want. With continue, didapi survives the child
+#     kill, the AGI's HTTP POST returns 500 for that one call (dids-cdr.py
+#     retries), and the reconciler stays online to catch anything the retry
+#     missed.
+#   OOMScoreAdjust=-500 → tell the kernel to strongly prefer killing other
+#     tasks (like tshark subprocesses) before killing didapi itself when
+#     global memory pressure hits. Range is -1000..1000; -500 is aggressive
+#     without pinning didapi as untouchable.
+OOMPolicy=continue
+OOMScoreAdjust=-500
 # Allow binding to ports < 1024 (e.g. :80) without root.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE

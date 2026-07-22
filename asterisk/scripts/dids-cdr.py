@@ -68,9 +68,29 @@ def main() -> None:
                 f"dids-cdr: cannot read /etc/didstorage/auth_token: {e}\n"
             )
 
-    started_at  = to_unix(cdr_start) or int(time.time())
+    # Timestamps come from Asterisk's CDR record. NEVER fall back to
+    # time.time() — if the AGI is delayed by minutes (didapi was
+    # restarting, dialplan wedged, etc.) time.time() will be way past the
+    # real hangup and the resulting billsec would be inflated by however
+    # long the AGI was queued for. Reject the CDR entirely rather than
+    # write a wrong one; the reconciler backstop will still stamp
+    # ended_at = now() as an approximation (bounded to ~1s of real
+    # hangup) if that path is taken instead.
+    started_at  = to_unix(cdr_start)
     answered_at = to_unix(cdr_answer)
-    ended_at    = to_unix(cdr_end) or int(time.time())
+    ended_at    = to_unix(cdr_end)
+    # If ended_at is missing but we have started_at + billsec, derive
+    # ended_at exactly — that's precisely what Asterisk would have
+    # computed. Safer than either 0 or wall-clock.
+    if not ended_at and started_at and billsec > 0:
+        ended_at = started_at + billsec
+    if not started_at or not ended_at:
+        sys.stderr.write(
+            f"dids-cdr.py: refusing to post CDR with missing timestamps "
+            f"call_id={call_id} start={cdr_start} end={cdr_end} bill={billsec_str} "
+            f"— reconciler will stamp ended_at when it evicts\n"
+        )
+        return
 
     body = json.dumps({
         "call_id":        call_id,
