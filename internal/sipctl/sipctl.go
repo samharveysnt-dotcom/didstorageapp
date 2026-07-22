@@ -685,10 +685,31 @@ func (h *Handler) decide(ctx context.Context, req AuthorizeRequest) AuthorizeRes
 		h.Log.Info("authorize allow (reserved DID)",
 			"call_id", req.CallID, "did", e164,
 			"route_kind", reservedRouteKind, "route_target", reservedRouteTarget)
+		// MaxSeconds picks a runaway ceiling appropriate for the branch:
+		//
+		//   audio / audio_group → 300s (5 min). Any realistic announcement,
+		//     IVR intro, or hold-music loop fits inside that. Prevents a
+		//     bogus long or looping clip (or a Playback that never returns
+		//     because the file is missing and Asterisk sat retrying) from
+		//     leaving the channel open indefinitely and inflating channel
+		//     counts / CDR durations downstream.
+		//
+		//   sip_uri / ip / sip_account → 4h. Reserved DIDs are commonly
+		//     used for internal forward destinations that legitimately host
+		//     long-running calls; the 4h ceiling matches the L() runaway
+		//     guard on billed customer calls.
+		//
+		// The dialplan enforces this via Set(TIMEOUT(absolute)=…) on the
+		// audio branch and via Dial(..., ${AUTH_MAX_SECONDS}, L(…)) on the
+		// forward branches.
+		maxSec := 4 * 60 * 60
+		if dialKind == "audio" {
+			maxSec = 300
+		}
 		return AuthorizeResponse{
 			Decision:      "allow",
 			ReservationID: req.CallID,
-			MaxSeconds:    4 * 60 * 60, // 4h cap, no billing tracking
+			MaxSeconds:    maxSec,
 			RouteKind:     dialKind,
 			RouteTarget:   reservedRouteTarget,
 		}

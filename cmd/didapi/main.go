@@ -176,8 +176,8 @@ func run() error {
 	// `asterisk -rx "core show channels concise"` is a ~5ms local
 	// subprocess; 30 calls/min is negligible CPU on this box.
 	livecalls.StartReconciler(ctx, rdb, livecalls.ReconcilerOptions{
-		TickInterval: 2 * time.Second,
-		SettleWindow: 5 * time.Second,
+		TickInterval: 1 * time.Second,
+		SettleWindow: 3 * time.Second,
 		ReleaseReservations: func(ctx context.Context, callIDs []string) error {
 			return livecalls.ReleaseChannelReservations(ctx, rdb, callIDs)
 		},
