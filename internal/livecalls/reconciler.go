@@ -49,6 +49,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -103,6 +105,14 @@ type ReconcilerOptions struct {
 	// act:user:* / act:did:* concurrency sets. Optional — omit if the
 	// caller only cares about the visibility index.
 	ReleaseReservations func(ctx context.Context, callIDs []string) error
+	// DB is the Postgres pool used to stamp cdrs.ended_at on ghost rows
+	// where /sipctl/cdr never fired. When set, the reconciler sets
+	// ended_at = now() and billsec = extract(epoch from now() - started_at)
+	// on every UPDATE, so downstream billing / duration displays reflect
+	// a value within tickInterval seconds of the real hangup instead of
+	// staying NULL forever (which was showing as an infinite duration
+	// on the /cdrs list). Only rows where ended_at IS NULL are touched.
+	DB *pgxpool.Pool
 	// Log receives structured events for every non-trivial sweep. If
 	// nil, sweeps are silent.
 	Log *slog.Logger
@@ -189,6 +199,23 @@ func runReconcileOnce(ctx context.Context, rdb *redis.Client, opts ReconcilerOpt
 	if opts.ReleaseReservations != nil {
 		if err := opts.ReleaseReservations(ctx, evicted); err != nil && opts.Log != nil {
 			opts.Log.Warn("livecalls reconciler release-reservations failed", "err", err)
+		}
+	}
+
+	// Stamp cdrs.ended_at on any shell rows that don't have it yet. We
+	// know the underlying Asterisk channel just died (this tick is the
+	// first to observe it gone), so now() is within tickInterval of the
+	// true hangup — way better than leaving ended_at NULL forever, which
+	// on the /cdrs list rendered as multi-minute Durations that didn't
+	// match the caller's own CDRs. Silent no-op when DB isn't wired in.
+	if opts.DB != nil {
+		if _, err := opts.DB.Exec(ctx, `
+			UPDATE cdrs
+			   SET ended_at = now(),
+			       billsec = GREATEST(0, EXTRACT(EPOCH FROM now() - started_at)::int)
+			 WHERE call_id = ANY($1) AND ended_at IS NULL`,
+			evicted); err != nil && opts.Log != nil {
+			opts.Log.Warn("livecalls reconciler cdr timestamp fill failed", "err", err)
 		}
 	}
 

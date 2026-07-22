@@ -187,6 +187,12 @@ func run() error {
 		ReleaseReservations: func(ctx context.Context, callIDs []string) error {
 			return livecalls.ReleaseChannelReservations(ctx, rdb, callIDs)
 		},
+		// Pass the pool so the reconciler can stamp cdrs.ended_at =
+		// now() on ghost rows. Otherwise a call where /sipctl/cdr
+		// failed to fire leaves ended_at NULL and the /cdrs list
+		// renders an implausibly-long Duration that doesn't match the
+		// caller's own CDRs.
+		DB:  pg.Pool,
 		Log: logger.With("component", "livecalls-reconciler"),
 	})
 	r.Group(func(r chi.Router) {
