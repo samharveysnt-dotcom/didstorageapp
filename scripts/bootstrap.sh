@@ -255,7 +255,7 @@ stage "Wipe prior DIDStorage state on $TARGET"
 remote_script <<'WIPE_EOF'
 set -e
 export DEBIAN_FRONTEND=noninteractive
-for svc in didapi didbill asterisk sip-capture nginx apache2 lighttpd caddy; do
+for svc in didapi didbill asterisk sip-capture rtp-capture nginx apache2 lighttpd caddy; do
   systemctl disable --now "$svc.service" 2>/dev/null || true
   systemctl reset-failed "$svc.service" 2>/dev/null || true
 done
@@ -277,7 +277,8 @@ rm -rf /opt/didstorage /etc/didstorage /var/lib/didstorage \
        /var/lib/asterisk/sounds/didstorage \
        /etc/systemd/system/didapi.service \
        /etc/systemd/system/didbill.service \
-       /etc/systemd/system/sip-capture.service
+       /etc/systemd/system/sip-capture.service \
+       /etc/systemd/system/rtp-capture.service
 # Asterisk config is replaced wholesale; back up first in case the operator
 # put something custom in /etc/asterisk we want to recover.
 if [ -d /etc/asterisk ]; then
@@ -576,25 +577,30 @@ ok "didapi.env written (DB password, SIPCTL token, PUBLIC_IP=$PUBLIC_IP)"
 
 stage "Install systemd units"
 
-# Ship all three units in one tar stream. The bundle is local in deploy/central/systemd/.
+# Ship all systemd units in one tar stream. The bundle is local in
+# deploy/central/systemd/. sip-capture and rtp-capture are separate
+# services: sip-capture writes SIP-signalling-only pcaps (hourly rotation,
+# small files) and rtp-capture writes RTP-header-only pcaps (200-byte
+# snaplen) for the /trace Call Quality tab. Splitting them prevents a
+# runaway trace extraction on a huge combined pcap from OOM-killing didapi.
 if (( DRY_RUN )); then
-  note "[dry-run] would tar-pipe didapi.service, didbill.service, sip-capture.service"
+  note "[dry-run] would tar-pipe didapi.service, didbill.service, sip-capture.service, rtp-capture.service"
 else
-  # Also ship the didbill.timer so the billing job runs on schedule.
   tar -C deploy/central/systemd -czf - \
-      didapi.service didbill.service didbill.timer sip-capture.service \
+      didapi.service didbill.service didbill.timer \
+      sip-capture.service rtp-capture.service \
     | "${SSH[@]}" "$TARGET" 'sudo tar -C /etc/systemd/system -xzf - && \
-                             chmod 0644 /etc/systemd/system/{didapi,didbill,sip-capture}.service /etc/systemd/system/didbill.timer && \
+                             chmod 0644 /etc/systemd/system/{didapi,didbill,sip-capture,rtp-capture}.service /etc/systemd/system/didbill.timer && \
                              systemctl daemon-reload'
-  # Enable everything so it survives reboot. sip-capture starts now (writes
-  # the pcaps that back the CDR sip-trace UI); didapi and didbill.timer are
-  # marked enabled but not started here — deploy.sh (Stage [08]) starts
-  # didapi after the binary is in place, and didbill.timer needs no
-  # explicit start (systemd runs it on schedule once enabled).
-  remote 'sudo systemctl enable didapi didbill.timer sip-capture && sudo systemctl start sip-capture' \
-    >/dev/null 2>&1 || warn "could not enable one of didapi / didbill.timer / sip-capture"
+  # Enable everything so it survives reboot. sip-capture + rtp-capture
+  # start now (write the pcaps that back the CDR sip-trace + call-quality
+  # UIs); didapi and didbill.timer are marked enabled but not started
+  # here — deploy.sh (Stage [08]) starts didapi after the binary is in
+  # place, and didbill.timer needs no explicit start.
+  remote 'sudo systemctl enable didapi didbill.timer sip-capture rtp-capture && sudo systemctl start sip-capture rtp-capture' \
+    >/dev/null 2>&1 || warn "could not enable one of didapi / didbill.timer / sip-capture / rtp-capture"
 fi
-ok "didapi.service + didbill.service + didbill.timer + sip-capture.service installed and enabled"
+ok "didapi + didbill + sip-capture + rtp-capture units installed and enabled"
 
 # ─────────────────────────────────────────────────────────────
 # Stage 8 — Base Asterisk configs

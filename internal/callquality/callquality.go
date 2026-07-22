@@ -28,7 +28,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -105,7 +104,11 @@ func Analyze(
 	dialogIPs []string,
 	windowStart, windowEnd time.Time,
 ) (*Report, error) {
-	pcaps, err := filepath.Glob(filepath.Join(siptrace.PcapDir, "*.pcap"))
+	// RTP-only capture files (written by rtp-capture.service with a
+	// 200-byte snaplen). SIP-only files (sip-*.pcap) don't contain RTP
+	// so there's nothing here to analyse in them; skipping them keeps
+	// tshark's per-file memory bounded and identical to a fresh install.
+	pcaps, err := filepath.Glob(filepath.Join(siptrace.PcapDir, "rtp-*.pcap"))
 	if err != nil {
 		return nil, fmt.Errorf("glob pcaps: %w", err)
 	}
@@ -233,14 +236,11 @@ func tsharkRTPStreams(ctx context.Context, pcap string, tStart, tEnd int64) ([]S
 		"-2", "-R", filter,
 		"-q", "-z", "rtp,streams",
 	}
-	cmd := exec.CommandContext(cctx, "tshark", args...)
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = nil
-	// Ignore exit code — tshark sometimes returns non-zero on truncated
-	// live pcaps but still writes valid stats above the error.
-	_ = cmd.Run()
-	return parseRTPStreams(stdout.Bytes()), nil
+	// Run under siptrace's prlimit wrapper — a runaway extraction against
+	// a pcap that turns out to be bigger than expected hits ENOMEM inside
+	// tshark rather than raising a cgroup OOM that would kill didapi.
+	out, _ := siptrace.RunTsharkBounded(cctx, args...)
+	return parseRTPStreams(out), nil
 }
 
 // parseRTPStreams parses tshark's `rtp,streams` tap. The table layout has

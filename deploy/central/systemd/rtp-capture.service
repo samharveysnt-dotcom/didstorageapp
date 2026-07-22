@@ -1,0 +1,31 @@
+[Unit]
+Description=RTP header capture for optional call-quality analysis
+After=network.target
+
+[Service]
+Type=simple
+User=root
+# RTP media in the Asterisk default port range 10000-20000. -s 200 keeps
+# just the L2/L3/L4 headers + RTP header (12 bytes) + a few bytes of
+# payload — enough for tshark's rtp,streams tap to compute packets / loss
+# / jitter / max-delta stats, but ORDERS OF MAGNITUDE smaller than a
+# full-payload capture. Combined with hourly rotation and 48-hour
+# retention (48 files) this keeps the disk footprint bounded and each
+# file small enough that a stats extraction is O(MB) not O(hundreds of MB).
+#
+# This capture powers the /cdrs/{id}/sip-trace "Call quality" tab only.
+# If not needed, safely disable with:
+#   systemctl disable --now rtp-capture
+#
+# NEVER read from these files for SIP-signalling extraction — the
+# siptrace lookup path globs sip-*.pcap only, not rtp-*.pcap.
+ExecStartPre=/bin/mkdir -p /var/lib/didstorage/sip-traces
+ExecStart=/usr/bin/tcpdump -i any -n -s 200 -W 48 -G 3600 \
+  -w /var/lib/didstorage/sip-traces/rtp-%%Y%%m%%d-%%H.pcap \
+  -Z root \
+  "udp portrange 10000-20000 and not ip6"
+Restart=always
+RestartSec=4
+
+[Install]
+WantedBy=multi-user.target

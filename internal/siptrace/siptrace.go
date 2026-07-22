@@ -43,6 +43,15 @@ import (
 
 const PcapDir = "/var/lib/didstorage/sip-traces"
 
+// pcapGlobSIP matches only the SIP-signalling captures written by
+// sip-capture.service. RTP captures (rtp-*.pcap, written by the separate
+// rtp-capture.service with a 200-byte snaplen for the Call Quality tab)
+// are intentionally excluded — they can be hundreds of MB and tshark's
+// display filter would try to fully-dissect every RTP packet just to
+// find 4 KB of SIP headers, which is what was OOM-killing didapi. The
+// callquality package globs rtp-*.pcap separately.
+const pcapGlobSIP = "sip-*.pcap"
+
 // Concurrency cap for tshark + grep workers WITHIN a single Lookup call.
 // Multiple Lookup calls in parallel are further throttled by globalTsharkSem
 // below; without that ceiling, a burst of call ends (each firing a
@@ -52,15 +61,27 @@ const maxParallel = 4
 
 // globalTsharkSem is a package-wide semaphore that caps the TOTAL number of
 // concurrent tshark subprocesses across every Lookup / callquality /
-// precomputeTrace caller in the process. Sized to 4 so peak resident memory
-// stays under ~1 GB even with today's ~600 MB pcaps. Additional callers
-// block until a slot frees, which is fine — precompute is best-effort and
-// admin trace-page loads are opportunistic.
+// precomputeTrace caller in the process. Cap 2 leaves a comfortable
+// margin below the didapi cgroup MemoryMax even with the smaller
+// SIP-only pcaps we now produce. The RTP capture is a separate,
+// snaplen-capped stream (rtp-capture.service) whose files are
+// intentionally much smaller than the old combined pcap, so peak tshark
+// RSS is now single-digit MB rather than 200 MB.
 //
 // Buffered channel used as a counting semaphore. Acquire by sending an
 // empty struct; release by receiving. runTshark holds one slot for the
 // entire tshark exec.
-var globalTsharkSem = make(chan struct{}, 4)
+var globalTsharkSem = make(chan struct{}, 2)
+
+// tsharkASLimitBytes is the address-space (virtual memory) cap enforced
+// per tshark invocation via `prlimit --as=…`. If tshark exceeds this,
+// its next allocation returns ENOMEM and tshark exits — but crucially,
+// no OOM signal is raised, so didapi and every other process in the
+// cgroup keep running. 300 MB is well above what the semaphore-limited
+// paths would ever legitimately need (SIP-only, hourly-rotated files
+// are ≤ 5-20 MB; call-quality analysis on 200-byte-snaplen RTP files
+// is similarly small).
+const tsharkASLimitBytes = 300 * 1024 * 1024
 
 // AcquireTsharkSlot blocks until a global tshark concurrency slot is
 // available, then returns a release function. Exported so packages that
@@ -199,7 +220,7 @@ type Sanitization struct {
 // Lookup returns the merged trace matching callID. Either the sanitized
 // prefix or the full form works. The trace is sorted by UnixTime.
 func Lookup(ctx context.Context, callID, ourPublicIP string) (*Trace, error) {
-	pcaps, err := filepath.Glob(filepath.Join(PcapDir, "*.pcap"))
+	pcaps, err := filepath.Glob(filepath.Join(PcapDir, pcapGlobSIP))
 	if err != nil {
 		return nil, fmt.Errorf("glob pcaps: %w", err)
 	}
@@ -461,13 +482,11 @@ func (tr *Trace) Sanitize(s Sanitization) {
 // reading a live pcap (last packet appears truncated) but earlier packets
 // are valid.
 func runTshark(ctx context.Context, pcap, filter string, extra ...string) ([]byte, error) {
-	// Global process-wide throttle: never let more than N tshark subprocesses
-	// exist concurrently across the whole didapi process. Peak resident
-	// memory per tshark is roughly the pcap file size (300-600 MB today), so
-	// unbounded parallelism was OOM-killing didapi under bursts of
-	// precomputeTrace goroutines. Blocking here is safe — the caller is
-	// either a background precompute (best-effort, latency doesn't matter)
-	// or an admin trace-page load (a few seconds of wait is fine).
+	// Global process-wide throttle: never let more than N tshark
+	// subprocesses exist concurrently. Blocking here is safe — the
+	// caller is either a background precompute (best-effort, latency
+	// doesn't matter) or an admin trace-page load (a few seconds of
+	// wait is fine).
 	select {
 	case globalTsharkSem <- struct{}{}:
 	case <-ctx.Done():
@@ -475,14 +494,47 @@ func runTshark(ctx context.Context, pcap, filter string, extra ...string) ([]byt
 	}
 	defer func() { <-globalTsharkSem }()
 
-	args := []string{"-n", "-r", pcap, "-Y", filter}
-	args = append(args, extra...)
+	tsharkArgs := []string{"-n", "-r", pcap, "-Y", filter}
+	tsharkArgs = append(tsharkArgs, extra...)
 	// Per-pcap timeout. preFilterPcaps already culled empties so this caps
-	// the worst case on a pcap that *does* contain the call-id but is huge
-	// (multi-GB rolling-day file).
+	// the worst case on a pcap that *does* contain the call-id.
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, "tshark", args...)
+	return RunTsharkBounded(cctx, tsharkArgs...)
+}
+
+// RunTsharkBounded execs tshark under a `prlimit --as=<limit>` wrapper so
+// a runaway extraction hits ENOMEM inside tshark instead of raising a
+// kernel OOM against the whole cgroup. Exported so packages that spawn
+// tshark directly (callquality) get the same guardrail.
+//
+// The wrapper is `prlimit --as=<bytes> -- tshark <args>`. prlimit comes
+// from util-linux (always installed on Debian). If prlimit isn't found
+// we fall back to a plain exec — better a rare OOM than every trace
+// lookup failing outright.
+//
+// Callers should still acquire a globalTsharkSem slot (or use
+// AcquireTsharkSlot) so concurrent invocations remain bounded — the AS
+// limit protects each individual process, the semaphore keeps the sum
+// bounded across the whole didapi cgroup.
+func RunTsharkBounded(ctx context.Context, tsharkArgs ...string) ([]byte, error) {
+	// Prepend prlimit invocation. --as sets the address-space rlimit
+	// (RLIMIT_AS) which caps virtual memory allocation. `--` separates
+	// prlimit's own flags from the target command.
+	fullArgs := []string{
+		fmt.Sprintf("--as=%d", tsharkASLimitBytes),
+		"--", "tshark",
+	}
+	fullArgs = append(fullArgs, tsharkArgs...)
+
+	var cmd *exec.Cmd
+	if _, err := exec.LookPath("prlimit"); err == nil {
+		cmd = exec.CommandContext(ctx, "prlimit", fullArgs...)
+	} else {
+		// prlimit not available — degrade gracefully.
+		cmd = exec.CommandContext(ctx, "tshark", tsharkArgs...)
+	}
+
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = nil

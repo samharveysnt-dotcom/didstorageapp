@@ -1,23 +1,26 @@
 [Unit]
-Description=Persistent SIP + RTP packet capture for CDR sip-trace + call-quality analysis
+Description=Signalling-only SIP packet capture for CDR sip-trace
 After=network.target
 
 [Service]
 Type=simple
 User=root
-# Capture SIP signalling (5060/5061) AND Asterisk's default RTP media port
-# range (10000-20000) so the call-quality analyser has RTP streams to work
-# from. Rolling pcap files, daily rotation, keep 7 files (~7 days).
-# %%Y / %%m / %%d become Y/m/d at runtime (systemd needs %% to escape).
+# SIP signalling only (5060/5061). ~KB per call, so a whole day of typical
+# traffic fits in a few MB. Rotates HOURLY (168 files = 7-day retention)
+# so didapi's trace extraction reads a MB-scale file instead of a
+# multi-hundred-MB one that has grown all day.
 #
-# The RTP range matches Asterisk's out-of-the-box rtp.conf. If you widen it
-# there, widen it here too, or the quality report will show one-way audio
-# for the missing side.
+# Full-payload snaplen (-s 0) is fine here — SIP messages are small and the
+# operator wants to see the full body (SDP etc.) on the /sip-trace page.
+#
+# NOTE: RTP capture is a SEPARATE service (rtp-capture.service) with a
+# smaller snaplen and shorter retention, so a runaway call-quality
+# extraction can never interfere with a SIP trace lookup.
 ExecStartPre=/bin/mkdir -p /var/lib/didstorage/sip-traces
-ExecStart=/usr/bin/tcpdump -i any -n -s 0 -W 7 -G 86400 \
-  -w /var/lib/didstorage/sip-traces/sip-%%Y%%m%%d.pcap \
+ExecStart=/usr/bin/tcpdump -i any -n -s 0 -W 168 -G 3600 \
+  -w /var/lib/didstorage/sip-traces/sip-%%Y%%m%%d-%%H.pcap \
   -Z root \
-  "udp and (port 5060 or port 5061 or portrange 10000-20000) and not ip6"
+  "udp and (port 5060 or port 5061) and not ip6"
 Restart=always
 RestartSec=4
 
