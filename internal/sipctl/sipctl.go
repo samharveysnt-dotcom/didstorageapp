@@ -45,6 +45,7 @@ import (
 	"didstorage/internal/db"
 	"didstorage/internal/domain"
 	"didstorage/internal/livecalls"
+	"didstorage/internal/settings"
 	"didstorage/internal/siptrace"
 )
 
@@ -687,12 +688,16 @@ func (h *Handler) decide(ctx context.Context, req AuthorizeRequest) AuthorizeRes
 			"route_kind", reservedRouteKind, "route_target", reservedRouteTarget)
 		// MaxSeconds picks a runaway ceiling appropriate for the branch:
 		//
-		//   audio / audio_group → 300s (5 min). Any realistic announcement,
-		//     IVR intro, or hold-music loop fits inside that. Prevents a
-		//     bogus long or looping clip (or a Playback that never returns
-		//     because the file is missing and Asterisk sat retrying) from
-		//     leaving the channel open indefinitely and inflating channel
-		//     counts / CDR durations downstream.
+		//   audio / audio_group → admin-configurable via the
+		//     `sip.reserved_audio_max_seconds` setting (see migration 0020).
+		//     Default 300s (5 min) fits any realistic announcement, IVR
+		//     intro, or hold-music loop. Prevents a bogus long or looping
+		//     clip (or a Playback that never returns because the file is
+		//     missing and Asterisk sat retrying) from leaving the channel
+		//     open indefinitely and inflating channel counts / CDR
+		//     durations downstream. Admin can lower it (aggressive runaway
+		//     guard for tight integrators) or raise it (long recordings on
+		//     reserved DIDs) from /settings without a redeploy.
 		//
 		//   sip_uri / ip / sip_account → 4h. Reserved DIDs are commonly
 		//     used for internal forward destinations that legitimately host
@@ -704,7 +709,7 @@ func (h *Handler) decide(ctx context.Context, req AuthorizeRequest) AuthorizeRes
 		// forward branches.
 		maxSec := 4 * 60 * 60
 		if dialKind == "audio" {
-			maxSec = 300
+			maxSec = settings.GetInt("sip.reserved_audio_max_seconds", 300)
 		}
 		return AuthorizeResponse{
 			Decision:      "allow",
