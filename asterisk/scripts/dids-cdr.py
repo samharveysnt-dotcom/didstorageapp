@@ -94,12 +94,26 @@ def main() -> None:
         method="POST",
     )
 
-    try:
-        with urllib.request.urlopen(req, timeout=3) as _r:
-            _r.read()
-    except Exception as e:
-        # Don't fail the AGI on CDR post error — log to stderr (asterisk captures).
-        sys.stderr.write(f"dids-cdr.py: post failed: {e}\n")
+    # Retry the POST up to 3 times with a small back-off. Every failed
+    # attempt here leaves the /live index and the act:* concurrency SETs
+    # holding a ghost row that only the reconciler goroutine can clean up
+    # — retrying here catches the transient case (didapi mid-restart, DB
+    # ledger stall on the write, TCP RST during connect) before it lands
+    # in Redis at all. The reconciler is still the ultimate backstop.
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=5) as _r:
+                _r.read()
+            return
+        except Exception as e:
+            sys.stderr.write(
+                f"dids-cdr.py: attempt {attempt + 1}/3 failed: {e}\n"
+            )
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+    sys.stderr.write(
+        f"dids-cdr.py: all attempts failed, call_id={call_id} left for reconciler\n"
+    )
 
 
 if __name__ == "__main__":

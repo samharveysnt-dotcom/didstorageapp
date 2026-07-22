@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/redis/go-redis/v9"
 
 	"didstorage/internal/audiogroup"
 	"didstorage/internal/auth"
@@ -350,7 +349,7 @@ func (h *Handler) liveForceCleanup(w http.ResponseWriter, r *http.Request) {
 	for _, cid := range evicted {
 		_ = livecalls.Deregister(r.Context(), h.Redis, cid)
 	}
-	if err := releaseChannelReservations(r.Context(), h.Redis, evicted); err != nil {
+	if err := livecalls.ReleaseChannelReservations(r.Context(), h.Redis, evicted); err != nil {
 		h.Log.Warn("live force-cleanup channel-reservation sweep", "err", err)
 	}
 
@@ -366,35 +365,9 @@ func (h *Handler) liveForceCleanup(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/live", http.StatusFound)
 }
 
-// releaseChannelReservations SCANs every act:* SET in Redis and SREMs each
-// provided call_id from it. Mirrors sipctl.releaseChannelByCallID, which
-// is package-private — this is the same logic inlined so the web package
-// doesn't have to import sipctl. Bounded SCAN cursor + pipelined SREMs,
-// so worst-case it's one round trip per Redis key page (200 keys/page).
-func releaseChannelReservations(ctx context.Context, rdb *redis.Client, callIDs []string) error {
-	var cursor uint64
-	for {
-		keys, next, err := rdb.Scan(ctx, cursor, "act:*", 200).Result()
-		if err != nil {
-			return err
-		}
-		if len(keys) > 0 {
-			pipe := rdb.Pipeline()
-			for _, k := range keys {
-				for _, cid := range callIDs {
-					pipe.SRem(ctx, k, cid)
-				}
-			}
-			if _, err := pipe.Exec(ctx); err != nil {
-				return err
-			}
-		}
-		if next == 0 {
-			return nil
-		}
-		cursor = next
-	}
-}
+// (releaseChannelReservations moved to livecalls.ReleaseChannelReservations
+// so the reconciler goroutine and the /live force-cleanup handler share the
+// same implementation. See internal/livecalls/reconciler.go.)
 
 // channelStates queries Asterisk for every active channel's state, keyed by
 // channel name (e.g. "PJSIP/supplier-trunk-00000063"). Returns nil on any

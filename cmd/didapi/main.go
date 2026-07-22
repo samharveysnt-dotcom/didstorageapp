@@ -26,6 +26,7 @@ import (
 	"didstorage/internal/causes"
 	"didstorage/internal/config"
 	"didstorage/internal/db"
+	"didstorage/internal/livecalls"
 	"didstorage/internal/resellerapi"
 	"didstorage/internal/settings"
 	"didstorage/internal/sipctl"
@@ -155,6 +156,23 @@ func run() error {
 	// coming up. Mutations through /suppliers/* handlers also re-trigger
 	// this on every change.
 	go webH.RegenSupplierIdentifiesStartup()
+
+	// Live-calls reconciler: every 15s, ask Asterisk which channels are
+	// still alive and sweep any live-calls index entry whose channel
+	// isn't. Backstop for the primary path (dialplan hangup handler →
+	// dids-cdr.py → /sipctl/cdr → Deregister) when that path fails to
+	// fire — a timed-out AGI POST, an abrupt channel destroy, a race
+	// with a didapi restart. Also releases the corresponding
+	// channel-reservation set memberships so the concurrency-cap check
+	// in /sipctl/authorize doesn't over-count against ghost calls.
+	livecalls.StartReconciler(ctx, rdb, livecalls.ReconcilerOptions{
+		TickInterval: 15 * time.Second,
+		SettleWindow: 20 * time.Second,
+		ReleaseReservations: func(ctx context.Context, callIDs []string) error {
+			return livecalls.ReleaseChannelReservations(ctx, rdb, callIDs)
+		},
+		Log: logger.With("component", "livecalls-reconciler"),
+	})
 	r.Group(func(r chi.Router) {
 		r.Use(sm.LoadAndSave)
 		webH.Mount(r)

@@ -28,13 +28,21 @@ import (
 )
 
 const (
-	activeKey   = "live:active"
-	metaPrefix  = "live:meta:"
-	defaultTTL  = 4 * time.Hour
-	// Sweep TTL — any ZSET entry whose score is older than this AND has no
-	// meta key gets evicted on the next List(). Same as defaultTTL so a
-	// genuinely-stuck reservation doesn't outlive its meta blob.
-	sweepWindow = 4 * time.Hour
+	activeKey  = "live:active"
+	metaPrefix = "live:meta:"
+	// defaultTTL is the ceiling for a live-call meta blob. Real calls are
+	// bounded above by the platform's balance-derived max seconds (usually
+	// <10 min) and the runaway L() timeout on the Dial (1h). 2h is a
+	// generous multiple of both — the reconciler goroutine
+	// (internal/livecalls/reconciler.go) evicts ghost rows within ~15s of
+	// the underlying channel dying, so this TTL is only reached by a call
+	// that is somehow both truly live AND has no matching Asterisk channel
+	// (impossible in practice).
+	defaultTTL = 2 * time.Hour
+	// sweepWindow is the age past which List() drops ZSET entries whose
+	// meta key has expired. Same reasoning as defaultTTL: the reconciler
+	// beats this by orders of magnitude on the happy path.
+	sweepWindow = 2 * time.Hour
 )
 
 // ActiveCall is the metadata captured at /authorize-allow time. Re-marshalled
