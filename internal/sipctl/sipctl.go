@@ -45,7 +45,6 @@ import (
 	"didstorage/internal/db"
 	"didstorage/internal/domain"
 	"didstorage/internal/livecalls"
-	"didstorage/internal/settings"
 	"didstorage/internal/siptrace"
 )
 
@@ -686,31 +685,13 @@ func (h *Handler) decide(ctx context.Context, req AuthorizeRequest) AuthorizeRes
 		h.Log.Info("authorize allow (reserved DID)",
 			"call_id", req.CallID, "did", e164,
 			"route_kind", reservedRouteKind, "route_target", reservedRouteTarget)
-		// MaxSeconds picks a runaway ceiling appropriate for the branch:
-		//
-		//   audio / audio_group → admin-configurable via the
-		//     `sip.reserved_audio_max_seconds` setting (see migration 0020).
-		//     Default 300s (5 min) fits any realistic announcement, IVR
-		//     intro, or hold-music loop. Prevents a bogus long or looping
-		//     clip (or a Playback that never returns because the file is
-		//     missing and Asterisk sat retrying) from leaving the channel
-		//     open indefinitely and inflating channel counts / CDR
-		//     durations downstream. Admin can lower it (aggressive runaway
-		//     guard for tight integrators) or raise it (long recordings on
-		//     reserved DIDs) from /settings without a redeploy.
-		//
-		//   sip_uri / ip / sip_account → 4h. Reserved DIDs are commonly
-		//     used for internal forward destinations that legitimately host
-		//     long-running calls; the 4h ceiling matches the L() runaway
-		//     guard on billed customer calls.
-		//
-		// The dialplan enforces this via Set(TIMEOUT(absolute)=…) on the
-		// audio branch and via Dial(..., ${AUTH_MAX_SECONDS}, L(…)) on the
-		// forward branches.
+		// MaxSeconds is the runaway ceiling — 4h for every reserved-DID
+		// branch (audio / audio_group / sip_uri / ip / sip_account). The
+		// audio branch itself is bounded by the clip's natural length;
+		// the ceiling is there only to catch a completely broken clip
+		// (missing file that Asterisk retries forever, or a
+		// pathological loop). No functional cap is applied.
 		maxSec := 4 * 60 * 60
-		if dialKind == "audio" {
-			maxSec = settings.GetInt("sip.reserved_audio_max_seconds", 300)
-		}
 		return AuthorizeResponse{
 			Decision:      "allow",
 			ReservationID: req.CallID,
