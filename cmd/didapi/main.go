@@ -157,7 +157,7 @@ func run() error {
 	// this on every change.
 	go webH.RegenSupplierIdentifiesStartup()
 
-	// Live-calls reconciler: every 15s, ask Asterisk which channels are
+	// Live-calls reconciler: every 2s, ask Asterisk which channels are
 	// still alive and sweep any live-calls index entry whose channel
 	// isn't. Backstop for the primary path (dialplan hangup handler →
 	// dids-cdr.py → /sipctl/cdr → Deregister) when that path fails to
@@ -165,9 +165,19 @@ func run() error {
 	// with a didapi restart. Also releases the corresponding
 	// channel-reservation set memberships so the concurrency-cap check
 	// in /sipctl/authorize doesn't over-count against ghost calls.
+	//
+	// 2s tick keeps ghost visibility ≤2-3s end-to-end. Settle window is
+	// 5s (>2× tick) so we never sweep a call during its own admission
+	// race between /sipctl/authorize and the first `core show channels`
+	// snapshot that includes its channel — in practice the channel is
+	// always visible immediately (the AGI runs on it) but the buffer
+	// costs nothing.
+	//
+	// `asterisk -rx "core show channels concise"` is a ~5ms local
+	// subprocess; 30 calls/min is negligible CPU on this box.
 	livecalls.StartReconciler(ctx, rdb, livecalls.ReconcilerOptions{
-		TickInterval: 15 * time.Second,
-		SettleWindow: 20 * time.Second,
+		TickInterval: 2 * time.Second,
+		SettleWindow: 5 * time.Second,
 		ReleaseReservations: func(ctx context.Context, callIDs []string) error {
 			return livecalls.ReleaseChannelReservations(ctx, rdb, callIDs)
 		},
