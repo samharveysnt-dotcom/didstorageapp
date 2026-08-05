@@ -392,8 +392,15 @@ else
     OUT=/var/backups/didstorage/predeploy-$TS.dump
     # Redirect from root; -c means custom-format (pg_restore compatible).
     sudo -u postgres pg_dump -Fc -d didstorage > "$OUT"
-    # Verify the dump is readable and shows a plausible catalog.
-    sudo -u postgres pg_restore -l "$OUT" > /dev/null
+    chmod 0600 "$OUT"
+    # Verify the dump is readable and shows a plausible catalog. This runs
+    # as ROOT, not postgres: /var/backups/didstorage is drwx------ root
+    # so postgres cant traverse into it. pg_restore -l is a plain file
+    # read (no DB connection) so it needs no postgres privileges.
+    if ! pg_restore -l "$OUT" > /dev/null; then
+      echo "pre-deploy dump failed verification: $OUT" >&2
+      exit 1
+    fi
     size=$(stat -c%s "$OUT" 2>/dev/null || echo 0)
     echo "backup written: $OUT  ($(( size / 1024 )) KB)"
     # Retention: keep the last 14 dumps. LC_ALL=C to make sort deterministic.
