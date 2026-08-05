@@ -2,6 +2,15 @@
 Description=DIDStorage API + GUI + SIP control plane
 After=network.target postgresql.service redis-server.service
 Wants=postgresql.service redis-server.service
+# StartLimit — a genuinely broken build (or missing binary, or bad env
+# file) with the default Restart=always/RestartSec=2 would produce an
+# infinite respawn loop instead of a clean failure that systemd
+# surfaces as `active (start-limit-hit)`. Cap it: 5 starts in 60s
+# means the loop trips and stops after the first 10s of thrashing,
+# and `journalctl` shows the actual reason instead of an endless
+# scroll of restart events.
+StartLimitBurst=5
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple

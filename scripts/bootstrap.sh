@@ -247,6 +247,39 @@ if (( ! ASSUME_YES )) && (( ! DRY_RUN )); then
 fi
 
 # ─────────────────────────────────────────────────────────────
+# Populated-database guard — refuses to wipe a server that already has
+# CDR history unless I_REALLY_MEAN_IT=1 is set. Runs REGARDLESS of
+# --yes/--assume-yes so automation can't accidentally destroy a
+# production DB by pointing bootstrap at the wrong host.
+#
+# On a fresh server the cdrs table doesn't exist, so the psql query
+# returns nothing → `|| echo 0` yields "0" → the guard passes. On an
+# existing server with any calls in the ledger, it aborts with a
+# pointer to deploy.sh (the correct "update" script).
+#
+# Under --dry-run, remote() returns empty stdout, so the guard also
+# correctly does not block.
+# ─────────────────────────────────────────────────────────────
+if (( ! DRY_RUN )); then
+  existing_rows=$(remote 'sudo -u postgres psql -tAc "select count(*) from cdrs" -d didstorage 2>/dev/null' || echo 0)
+  existing_rows=${existing_rows//[^0-9]/}
+  existing_rows=${existing_rows:-0}
+  if [[ "$existing_rows" -gt 0 ]]; then
+    errln "REFUSING to bootstrap: $TARGET already has a populated didstorage DB ($existing_rows cdrs)."
+    errln ""
+    errln "bootstrap.sh is FIRST-INSTALL ONLY. To update an existing server use:"
+    errln "    scripts/deploy.sh $TARGET"
+    errln ""
+    errln "If you REALLY intend to destroy this data (e.g. abandoning a test box),"
+    errln "re-run with:  I_REALLY_MEAN_IT=1 bash scripts/bootstrap.sh $TARGET --yes"
+    if [[ "${I_REALLY_MEAN_IT:-0}" != "1" ]]; then
+      exit 9
+    fi
+    warn "I_REALLY_MEAN_IT=1 — proceeding with wipe despite populated DB"
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────
 # Stage 2 — Wipe any prior DIDStorage state
 # ─────────────────────────────────────────────────────────────
 
@@ -322,9 +355,22 @@ apt-get install -y --no-install-recommends \
   libnewt-dev libpopt-dev libical-dev libspandsp-dev libgsm1-dev \
   libvorbis-dev libogg-dev libresample1-dev unixodbc-dev libneon27-dev
 systemctl enable --now postgresql redis-server >/dev/null
+
+# Cap journald so it doesn't grow unbounded (audit §7.6 saw 3.3 GB on a
+# 20-day-old box). 500M SystemMaxUse / 90d MaxRetentionSec — plenty of
+# history for post-incident forensics, no risk of filling /var.
+mkdir -p /etc/systemd/journald.conf.d
+cat >/etc/systemd/journald.conf.d/didstorage.conf <<'JOURNAL_EOF'
+[Journal]
+SystemMaxUse=500M
+SystemKeepFree=200M
+MaxRetentionSec=90day
+JOURNAL_EOF
+systemctl restart systemd-journald >/dev/null 2>&1 || true
+
 echo "packages installed"
 PKG_EOF
-ok "core packages installed (postgres, redis, ffmpeg, ufw, asterisk build deps)"
+ok "core packages installed (postgres, redis, ffmpeg, ufw, asterisk build deps; journald capped 500M/90d)"
 
 # ─────────────────────────────────────────────────────────────
 # Stage 3b — Build Asterisk from source
@@ -427,6 +473,12 @@ cat >/etc/systemd/system/asterisk.service <<UNIT
 Description=Asterisk PBX (DIDStorage)
 After=network.target postgresql.service redis-server.service didapi.service
 Wants=didapi.service
+# StartLimit: a broken config with the default Restart=always/RestartSec=4
+# combo would loop forever every 4s (systemd's default of 5-starts-in-10s
+# never trips because 4s spacing keeps at most 3 in any 10s window). Cap
+# it so a broken config fails visibly instead of thrashing.
+StartLimitBurst=5
+StartLimitIntervalSec=60
 
 [Service]
 Type=simple
@@ -436,6 +488,13 @@ ExecStart=/usr/sbin/asterisk -f -U asterisk -G asterisk -vvvg -C /etc/asterisk/a
 ExecReload=/usr/sbin/asterisk -rx 'core reload'
 Restart=always
 RestartSec=4
+# Runtime dir owned by asterisk:asterisk so /var/run/asterisk/asterisk.ctl
+# (mode 0660 from asterisk.conf astctlpermissions) is writable by the
+# asterisk user. Without this, /var/run/asterisk stays root:root and no
+# control socket is created — every subsequent `asterisk -rx` returns
+# "Unable to connect" and the livecalls reconciler silently skips.
+RuntimeDirectory=asterisk
+RuntimeDirectoryMode=2755
 LimitCORE=infinity
 LimitNOFILE=65536
 LimitNPROC=infinity

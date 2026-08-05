@@ -241,14 +241,22 @@ if (( SKIP_BUILD )); then
   [[ -f "$BUILD_OUT" ]] || { errln "$BUILD_OUT missing — re-run without --skip-build"; exit 4; }
   note "binary size: $(stat -c%s "$BUILD_OUT" 2>/dev/null || stat -f%z "$BUILD_OUT") bytes"
 else
-  stage "Build didapi for linux/amd64"
+  stage "Build didapi + didbill for linux/amd64"
   if (( DRY_RUN )); then
-    note "[dry-run] would build $BUILD_OUT"
+    note "[dry-run] would build $BUILD_OUT and didbill"
   else
     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
       go build -trimpath -ldflags='-s -w' \
       -o "$BUILD_OUT" ./cmd/didapi
-    ok "binary built: $BUILD_OUT ($(stat -c%s "$BUILD_OUT" 2>/dev/null || stat -f%z "$BUILD_OUT") bytes)"
+    ok "didapi built: $BUILD_OUT ($(stat -c%s "$BUILD_OUT" 2>/dev/null || stat -f%z "$BUILD_OUT") bytes)"
+    # didbill is the nightly billing job invoked by didbill.timer. Without
+    # this build+ship, the timer fails hourly with 203/EXEC (missing
+    # binary) — audit finding §7.6.
+    BUILD_BILL_OUT="${BUILD_BILL_OUT:-/tmp/didbill-linux-amd64}"
+    GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+      go build -trimpath -ldflags='-s -w' \
+      -o "$BUILD_BILL_OUT" ./cmd/didbill
+    ok "didbill built: $BUILD_BILL_OUT ($(stat -c%s "$BUILD_BILL_OUT" 2>/dev/null || stat -f%z "$BUILD_BILL_OUT") bytes)"
   fi
 fi
 
@@ -310,21 +318,35 @@ else
   warn "no migrations/*.sql found locally"
 fi
 
-# Binary
+# Binaries
 if (( DRY_RUN )); then
-  note "[dry-run] would scp $BUILD_OUT"
+  note "[dry-run] would scp $BUILD_OUT and didbill"
 else
   "${SCP[@]}" -q "$BUILD_OUT" "$TARGET:$REMOTE_STAGE/didapi.new"
+  if [[ -f "${BUILD_BILL_OUT:-/tmp/didbill-linux-amd64}" ]]; then
+    "${SCP[@]}" -q "${BUILD_BILL_OUT:-/tmp/didbill-linux-amd64}" "$TARGET:$REMOTE_STAGE/didbill.new"
+  fi
 fi
-ok "uploaded didapi binary"
+ok "uploaded didapi + didbill binaries"
 
-# Asterisk configs + AGI scripts
+# Asterisk configs + AGI scripts. codecs.conf, rtp.conf and the sysctl
+# drop-in are shipped alongside pjsip/extensions when present in the
+# repo — Stage 7 installs them only if they weren't previously touched
+# (the audit's rationale for keeping them safe as hand-edits still
+# holds; the repo is the canonical seed, not an authority that stomps
+# on-box state).
 if (( SKIP_ASTERISK == 0 )); then
   if (( DRY_RUN )); then
-    note "[dry-run] would scp asterisk/{pjsip,extensions}.conf and asterisk/scripts/*.py"
+    note "[dry-run] would scp asterisk/{pjsip,extensions,codecs,rtp}.conf, sysctl.d/*, asterisk/scripts/*.py"
   else
     [[ -f asterisk/pjsip.conf      ]] && "${SCP[@]}" -q asterisk/pjsip.conf      "$TARGET:$REMOTE_STAGE/asterisk/pjsip.conf"
     [[ -f asterisk/extensions.conf ]] && "${SCP[@]}" -q asterisk/extensions.conf "$TARGET:$REMOTE_STAGE/asterisk/extensions.conf"
+    [[ -f asterisk/codecs.conf     ]] && "${SCP[@]}" -q asterisk/codecs.conf     "$TARGET:$REMOTE_STAGE/asterisk/codecs.conf"
+    [[ -f asterisk/rtp.conf        ]] && "${SCP[@]}" -q asterisk/rtp.conf        "$TARGET:$REMOTE_STAGE/asterisk/rtp.conf"
+    if [[ -f deploy/central/sysctl.d/99-voip-tuning.conf ]]; then
+      remote "mkdir -p $REMOTE_STAGE/sysctl.d"
+      "${SCP[@]}" -q deploy/central/sysctl.d/99-voip-tuning.conf "$TARGET:$REMOTE_STAGE/sysctl.d/99-voip-tuning.conf"
+    fi
     if compgen -G "asterisk/scripts/*.py" >/dev/null; then
       "${SCP[@]}" -q asterisk/scripts/*.py "$TARGET:$REMOTE_STAGE/scripts/"
     fi
@@ -341,6 +363,45 @@ remote "rsync -a --delete $REMOTE_STAGE/migrations/ /opt/didstorage/migrations/ 
         chown -R root:root /opt/didstorage/migrations 2>/dev/null || true
         chmod 644 /opt/didstorage/migrations/*.sql 2>/dev/null || true"
 ok "migrations copied to /opt/didstorage/migrations/"
+
+# ─────────────────────────────────────────────────────────────
+# Stage 5b — Pre-deploy DB backup
+#
+# Belt-and-braces before every deploy that could touch schema. Migrations
+# run under `psql -1 -f` (one transaction per file) so a hard failure
+# rolls back cleanly, but a syntax-valid migration that turns out to be
+# SEMANTICALLY wrong is otherwise unrecoverable — this dump is the
+# rollback path in that case.
+#
+# Writing to a root-owned dir via a root shell redirect. This deliberately
+# avoids the pg_dump -f trap (audit finding §7.2 trap 1): `sudo -u
+# postgres pg_dump -f /var/backups/…` fails with permission denied on
+# ${HOME}/${cwd}, which the outer set -e turns into a script abort — so
+# we redirect from root instead of asking pg_dump to write directly.
+# Under --dry-run, skipped so we don't fill the disk with duplicate
+# dumps during test runs.
+# ─────────────────────────────────────────────────────────────
+
+if (( SKIP_MIGRATIONS )) || (( DRY_RUN )); then
+  stage "Pre-deploy DB backup (skipped)"
+else
+  stage "Pre-deploy DB backup"
+  remote 'set -e
+    install -d -m 0700 -o root -g root /var/backups/didstorage
+    TS=$(date -u +%Y%m%d-%H%M%S)
+    OUT=/var/backups/didstorage/predeploy-$TS.dump
+    # Redirect from root; -c means custom-format (pg_restore compatible).
+    sudo -u postgres pg_dump -Fc -d didstorage > "$OUT"
+    # Verify the dump is readable and shows a plausible catalog.
+    sudo -u postgres pg_restore -l "$OUT" > /dev/null
+    size=$(stat -c%s "$OUT" 2>/dev/null || echo 0)
+    echo "backup written: $OUT  ($(( size / 1024 )) KB)"
+    # Retention: keep the last 14 dumps. LC_ALL=C to make sort deterministic.
+    LC_ALL=C ls -1t /var/backups/didstorage/predeploy-*.dump 2>/dev/null \
+      | tail -n +15 | xargs -r rm -f --
+  '
+  ok "pre-deploy backup taken (kept newest 14 in /var/backups/didstorage/)"
+fi
 
 # ─────────────────────────────────────────────────────────────
 # Stage 6 — Migrations
@@ -441,6 +502,24 @@ else
       chown root:asterisk /etc/asterisk/extensions.conf
       chmod 640 /etc/asterisk/extensions.conf
     fi
+    # codecs.conf / rtp.conf — install ONLY if there is no on-box file
+    # yet (preserves any operator hand-edits, per audit §7.1). Fresh
+    # installs get the tuned defaults; existing installs are left alone
+    # unless the operator explicitly removes their file to opt in.
+    for f in codecs.conf rtp.conf; do
+      if [ -f $REMOTE_STAGE/asterisk/\$f ] && [ ! -f /etc/asterisk/\$f ]; then
+        mv $REMOTE_STAGE/asterisk/\$f /etc/asterisk/\$f
+        chown root:asterisk /etc/asterisk/\$f
+        chmod 640 /etc/asterisk/\$f
+      fi
+    done
+    # sysctl drop-in — install ONLY if not present. Requires reload.
+    if [ -f $REMOTE_STAGE/sysctl.d/99-voip-tuning.conf ] && [ ! -f /etc/sysctl.d/99-voip-tuning.conf ]; then
+      mv $REMOTE_STAGE/sysctl.d/99-voip-tuning.conf /etc/sysctl.d/99-voip-tuning.conf
+      chown root:root /etc/sysctl.d/99-voip-tuning.conf
+      chmod 644 /etc/sysctl.d/99-voip-tuning.conf
+      sysctl --system >/dev/null 2>&1 || true
+    fi
     if ls $REMOTE_STAGE/scripts/*.py >/dev/null 2>&1; then
       mkdir -p /opt/didstorage/scripts
       cp -f $REMOTE_STAGE/scripts/*.py /opt/didstorage/scripts/
@@ -470,8 +549,27 @@ remote "set -e
   fi
   chown didstorage:didstorage $REMOTE_STAGE/didapi.new
   chmod 755 $REMOTE_STAGE/didapi.new
+  # Atomic replace: mv within the same filesystem is a single rename(2).
+  # cp would return ETXTBSY on a running binary; mv doesn't (unlink +
+  # link). Never leave /opt/didstorage/bin/didapi missing between mv and
+  # restart: didapi.service has Restart=always/RestartSec=2 so a process
+  # exit during that window would produce a 203/EXEC respawn loop.
   mv $REMOTE_STAGE/didapi.new /opt/didstorage/bin/didapi
+  # didbill: shipped only if the build produced it. didbill.timer fires
+  # it hourly (see deploy/central/systemd/didbill.timer); a missing
+  # binary produces 203/EXEC every hour. No restart needed — the timer
+  # will pick up the new binary on next fire.
+  if [ -f $REMOTE_STAGE/didbill.new ]; then
+    chown didstorage:didstorage $REMOTE_STAGE/didbill.new
+    chmod 755 $REMOTE_STAGE/didbill.new
+    mv $REMOTE_STAGE/didbill.new /opt/didstorage/bin/didbill
+  fi
   systemctl restart didapi
+  # Prune old rollback copies: keep the newest 3, drop the rest.
+  # /opt/didstorage/bin/didapi.previous-* accumulated to ~130MB unbounded
+  # before this was added (audit finding §7.4).
+  LC_ALL=C ls -1t /opt/didstorage/bin/didapi.previous-* 2>/dev/null \
+    | tail -n +4 | xargs -r rm -f --
 "
 sleep 2
 state=$(remote 'systemctl is-active didapi' || true)

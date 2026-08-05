@@ -24,6 +24,8 @@ Posts to didapi /sipctl/authorize, then sets dialplan vars:
 import json
 import os
 import sys
+import time
+import urllib.error
 import urllib.request
 
 
@@ -91,12 +93,40 @@ def main() -> None:
         method="POST",
     )
 
-    try:
-        with urllib.request.urlopen(req, timeout=2) as r:
-            resp = json.loads(r.read())
-    except Exception as e:
+    # Retry policy: 3 attempts, 0.3s / 0.6s backoff between them, ONLY on
+    # transport-level failures (URLError, socket.timeout). The ~60ms
+    # window during a didapi restart used to reject an in-flight INVITE
+    # outright; the caller saw a hard cause code from the reject branch
+    # for something that would have succeeded on the retry.
+    #
+    # HTTPError explicitly NOT retried: it means didapi actually
+    # answered (401 bad token, 403 supplier IP not allowed, 5xx internal
+    # error). Those are semantic denials and retrying triples load on
+    # a struggling service. Idempotency on the retryable path is safe:
+    # /sipctl/authorize's DB writes use ON CONFLICT DO NOTHING/UPDATE
+    # (see internal/sipctl), so a duplicate POST cannot double-insert.
+    resp = None
+    last_err = None
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=2) as r:
+                resp = json.loads(r.read())
+            break
+        except urllib.error.HTTPError as e:
+            # didapi answered; don't retry.
+            last_err = f"http {e.code}: {e.reason}"
+            break
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            last_err = f"transport: {e}"
+            if attempt < 2:
+                time.sleep(0.3 * (attempt + 1))
+        except Exception as e:
+            # Unknown error class — don't loop.
+            last_err = f"unexpected: {e}"
+            break
+    if resp is None:
         agi_set("AUTH_DECISION", "error")
-        agi_set("AUTH_REASON",   f"http: {e}")
+        agi_set("AUTH_REASON",   last_err or "unknown")
         return
 
     agi_set("AUTH_DECISION",     resp.get("decision", ""))
