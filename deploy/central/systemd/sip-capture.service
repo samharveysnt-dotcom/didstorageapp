@@ -5,6 +5,14 @@ After=network.target
 [Service]
 Type=simple
 User=root
+# Yield CPU + I/O to the call-handling processes. tcpdump is real-time
+# in the sense that it must keep up with the wire, but it should never
+# outbid Asterisk / didapi for scheduling. Nice=10 + CPUWeight=20 keep
+# it low-priority under contention; IOSchedulingClass=idle means it
+# only competes for disk when nothing else needs it.
+Nice=10
+CPUWeight=20
+IOSchedulingClass=idle
 # SIP signalling only (5060/5061). ~KB per call, so a whole day of typical
 # traffic fits in a few MB. Rotates HOURLY (168 files = 7-day retention)
 # so didapi's trace extraction reads a MB-scale file instead of a

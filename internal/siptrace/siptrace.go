@@ -29,6 +29,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -51,6 +52,50 @@ const PcapDir = "/var/lib/didstorage/sip-traces"
 // find 4 KB of SIP headers, which is what was OOM-killing didapi. The
 // callquality package globs rtp-*.pcap separately.
 const pcapGlobSIP = "sip-*.pcap"
+
+// hourlyPcapsInWindow returns the SIP-signalling pcap files that COULD
+// contain packets for a call in [windowStart, windowEnd], padded by
+// one hour on each side.
+//
+// The padding covers three edge cases:
+//   - clock skew between the box and whoever timestamped the call row
+//   - calls spanning an hourly rotation boundary (start at HH:59, end
+//     at HH+1:01 — three files: HH-1, HH, HH+1)
+//   - the race where a call arrived at HH:00:00 UTC and the capture
+//     file rotation happened at HH:00:01, so the INVITE lives in the
+//     previous hour's file
+//
+// Filename shape written by sip-capture.service:
+//   sip-YYYYMMDD-HH.pcap    (tcpdump %Y%m%d-%H)
+//
+// If the file for a given hour doesn't exist (retention rolled it out,
+// or capture hadn't started yet), it's silently skipped by the caller's
+// stat/grep — this function only enumerates the *plausible* filenames.
+func hourlyPcapsInWindow(windowStart, windowEnd time.Time) []string {
+	start := windowStart.Add(-1 * time.Hour).UTC().Truncate(time.Hour)
+	end := windowEnd.Add(1 * time.Hour).UTC().Truncate(time.Hour)
+	var out []string
+	for t := start; !t.After(end); t = t.Add(time.Hour) {
+		fname := fmt.Sprintf("sip-%s.pcap", t.Format("20060102-15"))
+		p := filepath.Join(PcapDir, fname)
+		if _, err := os.Stat(p); err == nil {
+			out = append(out, p)
+		}
+	}
+	// Also include any daily-style legacy files (sip-YYYYMMDD.pcap without
+	// the -HH suffix) whose date falls inside the window. These are pre-
+	// audit files left from before the hourly split; they'll age out via
+	// normal retention. Only match ones whose YYYYMMDD is in-window to
+	// avoid re-globbing the whole directory.
+	for d := start.Truncate(24 * time.Hour); !d.After(end); d = d.Add(24 * time.Hour) {
+		fname := fmt.Sprintf("sip-%s.pcap", d.Format("20060102"))
+		p := filepath.Join(PcapDir, fname)
+		if _, err := os.Stat(p); err == nil {
+			out = append(out, p)
+		}
+	}
+	return out
+}
 
 // Concurrency cap for tshark + grep workers WITHIN a single Lookup call.
 // Multiple Lookup calls in parallel are further throttled by globalTsharkSem
@@ -219,10 +264,34 @@ type Sanitization struct {
 
 // Lookup returns the merged trace matching callID. Either the sanitized
 // prefix or the full form works. The trace is sorted by UnixTime.
+//
+// Wrapper for LookupWindow with a zero window (all pcap files considered).
+// Preferred call is LookupWindow with the call's started_at — restricting
+// the file set to the relevant hour cuts dissection cost by up to ~168x
+// on a 7-day retention set.
 func Lookup(ctx context.Context, callID, ourPublicIP string) (*Trace, error) {
-	pcaps, err := filepath.Glob(filepath.Join(PcapDir, pcapGlobSIP))
-	if err != nil {
-		return nil, fmt.Errorf("glob pcaps: %w", err)
+	return LookupWindow(ctx, callID, ourPublicIP, time.Time{}, time.Time{})
+}
+
+// LookupWindow is the time-scoped variant of Lookup. windowStart / windowEnd
+// bound which hourly pcap files (sip-YYYYMMDD-HH.pcap) get considered.
+// Callers with a known call time (any /cdrs viewer has cdrs.started_at)
+// should use this; the alternative is Lookup which scans all 168 hourly
+// files in the retention window.
+//
+// A 1-hour buffer on each side accommodates clock skew, calls that span
+// an hourly rotation boundary, and the case where a call arrives at
+// HH:00:00 and the file rotation happened at HH:00:01.
+func LookupWindow(ctx context.Context, callID, ourPublicIP string, windowStart, windowEnd time.Time) (*Trace, error) {
+	var pcaps []string
+	if windowStart.IsZero() || windowEnd.IsZero() {
+		var err error
+		pcaps, err = filepath.Glob(filepath.Join(PcapDir, pcapGlobSIP))
+		if err != nil {
+			return nil, fmt.Errorf("glob pcaps: %w", err)
+		}
+	} else {
+		pcaps = hourlyPcapsInWindow(windowStart, windowEnd)
 	}
 	sort.Strings(pcaps)
 
@@ -503,35 +572,103 @@ func runTshark(ctx context.Context, pcap, filter string, extra ...string) ([]byt
 	return RunTsharkBounded(cctx, tsharkArgs...)
 }
 
-// RunTsharkBounded execs tshark under a `prlimit --as=<limit>` wrapper so
-// a runaway extraction hits ENOMEM inside tshark instead of raising a
-// kernel OOM against the whole cgroup. Exported so packages that spawn
-// tshark directly (callquality) get the same guardrail.
+// RunTsharkBounded execs tshark inside a dedicated transient systemd
+// scope (`systemd-run --scope --slice=siptrace.slice`) with strict CPU
+// and memory bounds, then further pinned to idle CPU/IO priority via
+// nice/ionice. The layered guards address two separate risks:
 //
-// The wrapper is `prlimit --as=<bytes> -- tshark <args>`. prlimit comes
-// from util-linux (always installed on Debian). If prlimit isn't found
-// we fall back to a plain exec — better a rare OOM than every trace
-// lookup failing outright.
+//   CPU:  Without a quota, tshark parsing a hundred-MB pcap can chew
+//         50-80% of a core (audit 2026-08-06 measured this pegging
+//         both cores of the 2-vCPU box, capping the answered-call
+//         ceiling at ~34). CPUQuota=40% + CPUWeight=10 means tshark
+//         can never take more than ~0.4 of one core and yields to
+//         any other cgroup under pressure. nice/ionice pin the same
+//         scheduling class idea at the process level.
+//
+//   Memory: prlimit --as=300M inside the scope (kept) + MemoryMax on
+//         the scope itself. Belt-and-braces; either alone would
+//         handle the classic tshark-parses-huge-pcap OOM case.
+//
+// A runaway extraction now fails THAT ONE trace with ENOMEM or a
+// SIGKILL from the scope's memory controller, without affecting
+// didapi, Asterisk, or any other tshark that happens to be running.
+//
+// Fallback chain if the box lacks either tool:
+//   1. systemd-run + prlimit (preferred; needs systemd 249+ for -p
+//      MemoryMax on scope units — Debian 12 has 252)
+//   2. prlimit only (memory but not CPU quota)
+//   3. plain tshark (last resort — better a rare OOM than every
+//      trace lookup failing outright)
 //
 // Callers should still acquire a globalTsharkSem slot (or use
-// AcquireTsharkSlot) so concurrent invocations remain bounded — the AS
-// limit protects each individual process, the semaphore keeps the sum
-// bounded across the whole didapi cgroup.
+// AcquireTsharkSlot) so concurrent invocations remain bounded — the
+// per-process quota protects each individual tshark, the semaphore
+// keeps their sum bounded.
 func RunTsharkBounded(ctx context.Context, tsharkArgs ...string) ([]byte, error) {
-	// Prepend prlimit invocation. --as sets the address-space rlimit
-	// (RLIMIT_AS) which caps virtual memory allocation. `--` separates
-	// prlimit's own flags from the target command.
-	fullArgs := []string{
-		fmt.Sprintf("--as=%d", tsharkASLimitBytes),
-		"--", "tshark",
+	hasSystemdRun := false
+	if _, err := exec.LookPath("systemd-run"); err == nil {
+		hasSystemdRun = true
 	}
-	fullArgs = append(fullArgs, tsharkArgs...)
+	hasPrlimit := false
+	if _, err := exec.LookPath("prlimit"); err == nil {
+		hasPrlimit = true
+	}
+	hasNice := false
+	if _, err := exec.LookPath("nice"); err == nil {
+		hasNice = true
+	}
+	hasIonice := false
+	if _, err := exec.LookPath("ionice"); err == nil {
+		hasIonice = true
+	}
 
 	var cmd *exec.Cmd
-	if _, err := exec.LookPath("prlimit"); err == nil {
-		cmd = exec.CommandContext(ctx, "prlimit", fullArgs...)
-	} else {
-		// prlimit not available — degrade gracefully.
+	switch {
+	case hasSystemdRun && hasPrlimit:
+		// Preferred path. Layer:
+		//   systemd-run --scope --slice=siptrace.slice
+		//     -p CPUQuota=40% -p CPUWeight=10
+		//     -p MemoryMax=256M -p MemorySwapMax=0
+		//     nice -n 19 ionice -c3 prlimit --as=300M -- tshark ...
+		//
+		// --collect removes the scope on exit so failed scopes don't
+		// accumulate in `systemctl list-units --failed`.
+		args := []string{
+			"--scope", "--collect",
+			"--slice=siptrace.slice",
+			"-p", "CPUQuota=40%",
+			"-p", "CPUWeight=10",
+			"-p", "MemoryMax=256M",
+			"-p", "MemorySwapMax=0",
+			"--quiet",
+		}
+		if hasNice {
+			args = append(args, "nice", "-n", "19")
+		}
+		if hasIonice {
+			args = append(args, "ionice", "-c3")
+		}
+		args = append(args, "prlimit",
+			fmt.Sprintf("--as=%d", tsharkASLimitBytes),
+			"--", "tshark")
+		args = append(args, tsharkArgs...)
+		cmd = exec.CommandContext(ctx, "systemd-run", args...)
+
+	case hasPrlimit:
+		// No systemd-run available. Memory bounded via prlimit only;
+		// CPU quota not enforced (but semaphore still caps concurrency).
+		args := []string{fmt.Sprintf("--as=%d", tsharkASLimitBytes), "--", "tshark"}
+		args = append(args, tsharkArgs...)
+		if hasNice && hasIonice {
+			cmd = exec.CommandContext(ctx, "nice",
+				append([]string{"-n", "19", "ionice", "-c3", "prlimit"}, args...)...)
+		} else {
+			cmd = exec.CommandContext(ctx, "prlimit", args...)
+		}
+
+	default:
+		// Bare exec. Only reached on a box missing both util-linux and
+		// systemd — vanishingly unlikely on Debian 12.
 		cmd = exec.CommandContext(ctx, "tshark", tsharkArgs...)
 	}
 

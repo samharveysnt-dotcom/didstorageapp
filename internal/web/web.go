@@ -1642,7 +1642,11 @@ func (h *Handler) cdrSipTrace(w http.ResponseWriter, r *http.Request) {
 	}
 	if tr == nil {
 		var err error
-		tr, err = siptrace.Lookup(r.Context(), callID, h.PublicIP)
+		// Scope pcap file consideration to the call's own hour ±1h — the
+		// alternative (Lookup with no window) globs every hourly file in
+		// the 7-day retention set (168 files) and greps them all. Since
+		// we already fetched startedAt / endedAt above, use it.
+		tr, err = siptrace.LookupWindow(r.Context(), callID, h.PublicIP, startedAt, endedAt)
 		if err != nil {
 			h.Log.Error("siptrace lookup", "err", err)
 			http.Error(w, "trace lookup failed: "+err.Error(), 500)

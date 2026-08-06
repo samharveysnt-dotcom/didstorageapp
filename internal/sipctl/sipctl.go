@@ -45,7 +45,6 @@ import (
 	"didstorage/internal/db"
 	"didstorage/internal/domain"
 	"didstorage/internal/livecalls"
-	"didstorage/internal/siptrace"
 )
 
 // hostResolveCache accumulates the set of IPs ever seen via DNS for each
@@ -155,13 +154,12 @@ func snapshotFresh(m map[string]time.Time, now time.Time) []net.IP {
 }
 
 // PublicIP is set by main once the platform's outward-facing IP is known.
-// We need it inside background goroutines (precomputeTrace) which don't have
-// the request context to fetch it from. Thread-safe because it's set once
-// at startup before any goroutines spawn.
+// Kept for backwards-compat with any future callers that still need to know
+// which lane is "ours" for direction labelling from a background context.
+// Thread-safe because it's set once at startup before any goroutines spawn.
 var publicIPForBackground string
 
-// SetPublicIP wires the public IP into the sipctl package so background trace
-// pre-computation knows which lane is "ours" for direction labelling.
+// SetPublicIP wires the public IP into the sipctl package.
 func SetPublicIP(ip string) { publicIPForBackground = ip }
 
 type Handler struct {
@@ -174,53 +172,26 @@ type Handler struct {
 	MinSecondsToAuthorize int
 }
 
-// precomputeTrace runs siptrace.Lookup in the background a few seconds after
-// a call ends, then stores the JSON result on the cdrs row. Subsequent loads
-// of /cdrs/{call_id}/sip-trace are then instant — no tshark needed.
+// precomputeTrace is intentionally a no-op as of 2026-08-06.
 //
-// Best-effort: errors are logged and dropped. We delay 5s before lookup so
-// the rolling pcap file has had time to flush the call's last packets.
-func (h *Handler) precomputeTrace(callID string) {
-	go func(cid string) {
-		// Sleep with a fresh context, NOT inheriting the request context
-		// (which has long since been cancelled).
-		select {
-		case <-time.After(5 * time.Second):
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-		defer cancel()
-		tr, err := siptrace.Lookup(ctx, cid, publicIPForBackground)
-		if err != nil {
-			h.Log.Warn("precomputeTrace lookup", "err", err, "call_id", cid)
-			return
-		}
-		// Don't persist an empty trace. A zero-message result usually means
-		// something transient (tshark missing, pcap flushing mid-parse, a
-		// permission race with sip-capture's daily rotation). Writing it to
-		// siptrace_json would let every future page load hit the fast-path
-		// and return empty forever. Skipping the UPDATE keeps siptrace_json
-		// NULL so /sip-trace re-runs Lookup on the next visit and self-heals.
-		if len(tr.Messages) == 0 {
-			h.Log.Info("siptrace precompute produced no messages, not persisting",
-				"call_id", cid)
-			return
-		}
-		blob, err := json.Marshal(tr)
-		if err != nil {
-			h.Log.Warn("precomputeTrace marshal", "err", err, "call_id", cid)
-			return
-		}
-		if _, err := h.DB.Exec(ctx,
-			`UPDATE cdrs SET siptrace_json = $1::jsonb, siptrace_computed_at = now() WHERE call_id = $2`,
-			blob, cid); err != nil {
-			h.Log.Warn("precomputeTrace persist", "err", err, "call_id", cid)
-			return
-		}
-		h.Log.Info("siptrace precomputed",
-			"call_id", cid, "messages", len(tr.Messages),
-			"endpoints", len(tr.Endpoints))
-	}(callID)
-}
+// Previously this fired a background goroutine per call that ran tshark
+// against the rolling pcap 5s after each hangup. Under load that produced
+// dozens of concurrent tshark processes (each ~200 MB RSS + ~0.5 core
+// CPU) racing against Asterisk for the same 2 vCPUs — the audit measured
+// tshark taking 80% of the box during a 50-concurrent-call blast and
+// capping the answered-call ceiling at ~34, while only 29% of calls
+// actually got a trace persisted (the rest lost the CPU race).
+//
+// The extraction is now purely on-demand: web.cdrSipTrace's cache-miss
+// branch runs siptrace.Lookup lazily when someone opens the /sip-trace
+// page and persists the JSON back for future viewers. Most calls never
+// have their trace opened, so most calls never pay the tshark cost. The
+// few that get viewed pay it once, without competing with live-call
+// answering.
+//
+// Keeping the method (as a nop) so callers can be removed independently
+// from a redeploy without a build break.
+func (h *Handler) precomputeTrace(_ string) {}
 
 type AuthorizeRequest struct {
 	CallID  string `json:"call_id"`
@@ -335,10 +306,8 @@ func (h *Handler) denialCDR(ctx context.Context, req AuthorizeRequest, orderID, 
 		h.Log.Warn("denialCDR insert failed", "err", err, "call_id", req.CallID, "cause", cause)
 		return
 	}
-	// Background-precompute the trace so /sip-trace is instant on first open.
-	// Even denial CDRs have a few packets in pcap (the inbound INVITE plus
-	// our 4xx reply).
-	h.precomputeTrace(domain.SanitizeCallID(req.CallID))
+	// No per-call trace precompute here. web.cdrSipTrace runs the
+	// extraction lazily when a viewer opens the trace page.
 }
 
 // supplierIPAllowed returns true if srcIP is inside one of the supplier's IP
@@ -451,7 +420,7 @@ func (h *Handler) unbilledCDR(ctx context.Context, req AuthorizeRequest, supplie
 		h.Log.Warn("unbilledCDR insert failed", "err", err, "call_id", req.CallID, "cause", cause)
 		return
 	}
-	h.precomputeTrace(domain.SanitizeCallID(req.CallID))
+	// No per-call trace precompute (see precomputeTrace comment).
 }
 
 // fillUnbilledCDR is /cdr's tear-down counterpart to unbilledCDR / denialCDR.
@@ -1061,9 +1030,10 @@ func (h *Handler) cdr(w http.ResponseWriter, r *http.Request) {
 		"order_id", orderID,
 		"user_id", userID,
 	)
-	// Kick off the background trace precompute so the SIP trace page is
-	// instant the first time an admin opens it after the call ends.
-	h.precomputeTrace(sanitizedCallID)
+	// No per-call trace precompute — extraction is now purely on-demand
+	// from web.cdrSipTrace's cache-miss branch. Keeps the call-teardown
+	// path off the pcap-processing path so tshark can never compete with
+	// Asterisk for CPU during a live-call burst.
 	writeJSON(w, http.StatusOK, CDRResponse{Status: "ok", ChargeCents: chargeCents})
 }
 

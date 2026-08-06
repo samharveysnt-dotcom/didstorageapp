@@ -5,6 +5,12 @@ After=network.target
 [Service]
 Type=simple
 User=root
+# Yield CPU + I/O to call-handling processes (see sip-capture.service
+# for rationale). RTP capture is even more bursty than SIP so this
+# matters more here.
+Nice=10
+CPUWeight=20
+IOSchedulingClass=idle
 # RTP media in the Asterisk default port range 10000-20000. -s 200 keeps
 # just the L2/L3/L4 headers + RTP header (12 bytes) + a few bytes of
 # payload — enough for tshark's rtp,streams tap to compute packets / loss
