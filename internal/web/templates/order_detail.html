@@ -45,7 +45,11 @@
   </div>
   <div class="card">
     <div class="label">Channels &amp; route</div>
-    <div class="value" style="font-size:1rem">{{.Order.ChannelCount}} · {{siptarget .Order.RouteKind .Order.RouteTarget}}</div>
+    <div class="value" style="font-size:1rem">{{.Order.ChannelCount}} ·
+      {{if eq .Order.RouteKind "audio_group"}}<span class="route-kind">audio_group</span>
+        {{if .Order.AudioGroupName}}<code>{{.Order.AudioGroupName}}</code>{{else}}<span class="muted">(group deleted)</span>{{end}}
+      {{else}}{{siptarget .Order.RouteKind .Order.RouteTarget}}{{end}}
+    </div>
     <div class="sub">anniversary day {{.Order.AnniversaryDay}} · next billing {{.Order.NextBillingAt}}</div>
   </div>
 </div>
@@ -67,7 +71,11 @@
       <div class="k">Order id</div><div class="v">#{{.Order.ID}}</div>
       <div class="k">Assigned at</div><div class="v">{{.Order.AssignedAt}}</div>
       {{if .Order.EndedAt}}<div class="k">Ended at</div><div class="v">{{.Order.EndedAt}}</div>{{end}}
-      <div class="k">Route</div><div class="v">{{siptarget .Order.RouteKind .Order.RouteTarget}}</div>
+      <div class="k">Route</div><div class="v">
+        {{if eq .Order.RouteKind "audio_group"}}<span class="route-kind">audio_group</span>
+          {{if .Order.AudioGroupName}}<code>{{.Order.AudioGroupName}}</code>{{else}}<span class="muted">(group deleted)</span>{{end}}
+        {{else}}{{siptarget .Order.RouteKind .Order.RouteTarget}}{{end}}
+      </div>
       <div class="k">Channels</div><div class="v">{{.Order.ChannelCount}}</div>
       <div class="k">Anniversary</div><div class="v">day {{.Order.AnniversaryDay}} of month</div>
       <div class="k">KYC bundle</div><div class="v">{{if .Order.KycBundleID}}<a class="link" href="/kyc-bundles/{{.Order.KycBundleID}}">#{{.Order.KycBundleID}}</a> <span class="pill pill-{{.Order.KycBundleStatus}}">{{.Order.KycBundleStatus}}</span>{{else}}<span class="muted">— none —</span>{{end}}</div>

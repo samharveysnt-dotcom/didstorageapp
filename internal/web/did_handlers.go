@@ -260,20 +260,30 @@ func (h *Handler) didRelease(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) didCDRs(w http.ResponseWriter, r *http.Request) {
 	id := pathID(r, "id")
 	var d struct {
-		ID                              int64
-		E164, Country, Type, Supplier   string
-		Status                          string
-		ReservedKind, ReservedTarget    string
-		ReservedNote                    string
+		ID                            int64
+		E164, Country, Type, Supplier string
+		Status                        string
+		ReservedKind, ReservedTarget  string
+		ReservedNote                  string
+		// ReservedAudioGroupName carries audio_groups.name for
+		// ReservedKind='audio_group' reservations. Necessary because
+		// dids.reserved_route_target is intentionally blank on those
+		// rows (the concrete file is picked per-INVITE), and the
+		// template previously rendered em-dash instead of the group.
+		ReservedAudioGroupName string
 	}
 	err := h.DB.QueryRow(r.Context(), `
 		SELECT d.id, d.e164, d.country_iso, d.did_type::text, s.name, d.status,
 		       COALESCE(d.reserved_route_kind::text,''), COALESCE(d.reserved_route_target,''),
-		       COALESCE(d.reserved_note,'')
-		  FROM dids d JOIN suppliers s ON s.id=d.supplier_id
+		       COALESCE(d.reserved_note,''),
+		       COALESCE(ag.name,'')
+		  FROM dids d
+		  JOIN suppliers s ON s.id=d.supplier_id
+		  LEFT JOIN audio_groups ag ON ag.id = d.reserved_audio_group_id
 		 WHERE d.id=$1`, id,
 	).Scan(&d.ID, &d.E164, &d.Country, &d.Type, &d.Supplier, &d.Status,
-		&d.ReservedKind, &d.ReservedTarget, &d.ReservedNote)
+		&d.ReservedKind, &d.ReservedTarget, &d.ReservedNote,
+		&d.ReservedAudioGroupName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.NotFound(w, r)
 		return

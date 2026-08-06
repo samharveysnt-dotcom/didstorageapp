@@ -18,7 +18,17 @@
   {{if eq .DID.Status "reserved"}}
   <div class="card">
     <div class="label">Reserved route</div>
-    <div class="value" style="font-size:1rem">{{siptarget .DID.ReservedKind .DID.ReservedTarget}}</div>
+    <div class="value" style="font-size:1rem">
+      {{if eq .DID.ReservedKind "audio_group"}}
+        {{/* dids.reserved_route_target is blank on audio_group rows —
+             the concrete file is picked per-INVITE. Render the group
+             name (falls back if the group row got deleted). */}}
+        <span class="route-kind">audio_group</span>
+        {{if .DID.ReservedAudioGroupName}}<code>{{.DID.ReservedAudioGroupName}}</code>{{else}}<span class="muted">(group deleted)</span>{{end}}
+      {{else}}
+        {{siptarget .DID.ReservedKind .DID.ReservedTarget}}
+      {{end}}
+    </div>
     <div class="sub">{{if .DID.ReservedNote}}{{.DID.ReservedNote}}{{else}}no note{{end}}</div>
   </div>
   {{end}}

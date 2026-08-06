@@ -39,6 +39,12 @@ func (h *Handler) orderDetail(w http.ResponseWriter, r *http.Request) {
 		// AudioGroupID is set when RouteKind=audio_group; nil/0 otherwise.
 		// Drives the route-edit form's pre-selection of the existing group.
 		AudioGroupID                                           int64
+		// AudioGroupName is the human-readable label for the audio_group
+		// when RouteKind=audio_group. Necessary because o.route_target is
+		// blank on those rows (the concrete audio file is picked
+		// per-INVITE), so without it the Route field on the order-detail
+		// page rendered em-dash.
+		AudioGroupName                                         string
 		ChannelCount, AnniversaryDay                           int
 		AssignedAt, NextBillingAt, EndedAt                     string
 		KycBundleStatus                                        string
@@ -62,6 +68,7 @@ func (h *Handler) orderDetail(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(u.reseller_id, 0), COALESCE(re.name, ''),
 		       o.status::text, o.route_kind::text, COALESCE(o.route_target,''),
 		       COALESCE(o.audio_group_id, 0),
+		       COALESCE(ag.name, ''),
 		       o.channel_count, o.anniversary_day,
 		       to_char(o.assigned_at, 'YYYY-MM-DD HH24:MI'),
 		       to_char(o.next_billing_at, 'YYYY-MM-DD'),
@@ -75,14 +82,15 @@ func (h *Handler) orderDetail(w http.ResponseWriter, r *http.Request) {
 		  JOIN dids        d  ON d.id  = o.did_id
 		  JOIN suppliers   s  ON s.id  = d.supplier_id
 		  JOIN users       u  ON u.id  = o.user_id
-		  LEFT JOIN resellers  re ON re.id = u.reseller_id
+		  LEFT JOIN resellers   re ON re.id = u.reseller_id
+		  LEFT JOIN audio_groups ag ON ag.id = o.audio_group_id
 		  JOIN rate_cards  rc ON rc.id = o.rate_card_id
 		 WHERE o.id = $1`, id).Scan(
 		&hd.ID, &hd.UserID, &hd.DIDID, &hd.SupplierID, &hd.RateCardID, &hd.KycBundleID,
 		&hd.E164, &hd.Country, &hd.Type, &hd.Supplier,
 		&hd.UserRef, &hd.UserStatus, &hd.ResellerID, &hd.ResellerName,
 		&hd.Status, &hd.RouteKind, &hd.RouteTarget,
-		&hd.AudioGroupID,
+		&hd.AudioGroupID, &hd.AudioGroupName,
 		&hd.ChannelCount, &hd.AnniversaryDay,
 		&hd.AssignedAt, &hd.NextBillingAt, &hd.EndedAt, &hd.KycBundleStatus,
 		&nrc, &mrc, &chMo, &perMin,
