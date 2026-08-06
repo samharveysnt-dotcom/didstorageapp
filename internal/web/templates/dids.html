@@ -64,7 +64,16 @@ function dsFilterDids(){
   <td class="muted">
     {{if eq .Status "reserved"}}
       <span class="pill pill-warn">reserved</span>
-      {{siptarget .ReservedKind .ReservedTarget}}
+      {{if eq .ReservedKind "audio_group"}}
+        {{/* dids.reserved_route_target is blank on audio_group rows —
+             the concrete file is picked per-INVITE. Render the group
+             name directly (falls back to the raw kind if the group
+             row got deleted). */}}
+        <span class="route-kind">audio_group</span>
+        {{if .ReservedAudioGroupName}}<code>{{.ReservedAudioGroupName}}</code>{{else}}<span class="muted">(group deleted)</span>{{end}}
+      {{else}}
+        {{siptarget .ReservedKind .ReservedTarget}}
+      {{end}}
       {{if .ReservedNote}}<span class="subtext" title="{{.ReservedNote}}">· {{.ReservedNote}}</span>{{end}}
     {{else if .AssignedUserID}}
       <a class="link" href="/users/{{.AssignedUserID}}">{{if .AssignedTo}}{{.AssignedTo}}{{else}}#{{.AssignedUserID}}{{end}}</a>

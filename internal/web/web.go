@@ -785,6 +785,14 @@ func (h *Handler) dids(w http.ResponseWriter, r *http.Request) {
 		// audio_files row a DID is reserved to (when ReservedKind='audio').
 		// Blank for non-audio reservations.
 		ReservedAudioName string
+		// ReservedAudioGroupName is the audio_groups.name for
+		// ReservedKind='audio_group' reservations. The DB column
+		// dids.reserved_route_target is intentionally blank on those
+		// rows (the concrete audio file is picked per-INVITE by
+		// pickAudioGroupMember), so without this the /dids page
+		// rendered "reserved —" with a blank target. Now shows
+		// "audio_group <group-name>".
+		ReservedAudioGroupName string
 	}
 	allowedSorts := map[string]string{
 		"id":       "d.id",
@@ -826,12 +834,14 @@ func (h *Handler) dids(w http.ResponseWriter, r *http.Request) {
 		       COALESCE(d.reserved_route_kind::text, ''),
 		       COALESCE(d.reserved_route_target, ''),
 		       COALESCE(d.reserved_note, ''),
-		       COALESCE(af.name, '')
+		       COALESCE(af.name, ''),
+		       COALESCE(ag.name, '')
 		  FROM dids d
 		  JOIN suppliers s ON s.id = d.supplier_id
 		  LEFT JOIN orders o ON o.did_id = d.id AND o.status IN ('active','kyc_pending','quarantined')
 		  LEFT JOIN users  u ON u.id = o.user_id
-		  LEFT JOIN audio_files af ON af.id = d.reserved_audio_file_id` + where +
+		  LEFT JOIN audio_files  af ON af.id = d.reserved_audio_file_id
+		  LEFT JOIN audio_groups ag ON ag.id = d.reserved_audio_group_id` + where +
 		orderByClause(allowedSorts, pg) +
 		fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(args)-1, len(args))
 
@@ -848,7 +858,7 @@ func (h *Handler) dids(w http.ResponseWriter, r *http.Request) {
 			&x.AssignedTo, &x.AssignedUserID, &x.AssignedOrderID,
 			&x.Channels, &x.RouteKind, &x.RouteTarget, &x.OrderStatus,
 			&x.ReservedKind, &x.ReservedTarget, &x.ReservedNote,
-			&x.ReservedAudioName); err == nil {
+			&x.ReservedAudioName, &x.ReservedAudioGroupName); err == nil {
 			out = append(out, x)
 		}
 	}
