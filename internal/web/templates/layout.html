@@ -608,6 +608,342 @@ td.num,.right,th.num{text-align:right;font-variant-numeric:tabular-nums}
 
 /* delight: <kbd class="kbd"> keycap chips. */
 kbd.kbd{display:inline-block;background:var(--surface-2);border:1px solid var(--line);border-bottom-width:2px;border-radius:3px;padding:.1rem .4rem;font:600 11px/1.4 var(--font-mono);color:var(--ink-1);margin:0 .1rem;min-width:1.2em;text-align:center}
+
+/* ============================================================================
+ * CARRIER-GRADE INTRANET SKIN
+ * ----------------------------------------------------------------------------
+ * Overrides applied ONLY when body[data-section="users"] or ["cdrs"] is
+ * set (i.e. we're inside the /users or /cdrs part of the app). Every rule
+ * targets the same DOM the polished skin does — no elements added,
+ * removed, or restructured — so the reading order and layout are identical.
+ * The look flips from "modern SaaS product" to "wholesale-telco NOC portal
+ * bought from a Nortel VAR in 2004": mono body font, hard corners, hairline
+ * grid on tables, flat borders instead of pills / shadows, dense padding.
+ *
+ * To revert this entire skin: delete this block (everything between
+ * BEGIN CARRIER-GRADE SKIN and END CARRIER-GRADE SKIN) OR change the
+ * <body data-section="..."> attribute to something no rule matches
+ * (e.g. remove the attribute). No other file changes are required.
+ *
+ * ── BEGIN CARRIER-GRADE SKIN ────────────────────────────────────────────── */
+
+body[data-section="users"], body[data-section="cdrs"] {
+  /* Root type stack: mono body, condensed sans for headings. Matches the
+     Solaris admindb / Ericsson EMA aesthetic more than a modern webapp. */
+  font-family: "Consolas", "Menlo", "DejaVu Sans Mono", "Courier New", monospace !important;
+  font-size: 13px;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+body[data-section="users"] .content,
+body[data-section="cdrs"]  .content {
+  font-family: inherit;
+}
+body[data-section="users"] h1, body[data-section="users"] h2, body[data-section="users"] h3, body[data-section="users"] h4,
+body[data-section="cdrs"]  h1, body[data-section="cdrs"]  h2, body[data-section="cdrs"]  h3, body[data-section="cdrs"]  h4 {
+  font-family: "Tahoma", "Verdana", "DejaVu Sans", "Arial", sans-serif;
+  font-weight: 700;
+  letter-spacing: .3px;
+  text-transform: uppercase;
+  color: var(--ink-1);
+}
+body[data-section="users"] h1, body[data-section="cdrs"] h1 { font-size: 15px; padding: .3rem 0 .5rem; border-bottom: 1px solid var(--line); }
+body[data-section="users"] h2, body[data-section="cdrs"] h2 { font-size: 13px; margin: 1rem 0 .5rem; }
+body[data-section="users"] h3, body[data-section="cdrs"] h3 { font-size: 12px; margin: .8rem 0 .4rem; }
+
+/* Kill everything soft: rounded corners, shadows, gradients, animations. */
+body[data-section="users"] *, body[data-section="cdrs"] * {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+body[data-section="users"] *, body[data-section="cdrs"] * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Tables — the workhorse of this idiom. Hairline grid, dense cells, tight
+   header bar with a subtle bottom bevel. Zebra striping via row bg. */
+body[data-section="users"] table,
+body[data-section="cdrs"]  table {
+  border: 1px solid var(--line);
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+body[data-section="users"] table th,
+body[data-section="cdrs"]  table th,
+body[data-section="users"] table td,
+body[data-section="cdrs"]  table td {
+  border: 1px solid var(--line-soft);
+  padding: 4px 8px;
+  vertical-align: middle;
+}
+body[data-section="users"] table thead th,
+body[data-section="cdrs"]  table thead th {
+  background: var(--surface-4);
+  color: var(--ink-1);
+  font-family: "Tahoma", "Verdana", sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  letter-spacing: .5px;
+  text-align: left;
+  padding: 5px 8px;
+  border-bottom: 2px solid var(--line);
+}
+body[data-section="users"] table tbody tr:nth-child(even),
+body[data-section="cdrs"]  table tbody tr:nth-child(even) {
+  background: var(--surface-2);
+}
+body[data-section="users"] table tbody tr:hover,
+body[data-section="cdrs"]  table tbody tr:hover {
+  background: var(--surface-3) !important;
+  outline: 1px solid var(--line);
+  outline-offset: -1px;
+}
+
+/* Cards / sections — flatten to a labelled panel with a hairline border
+   and a title-bar-style header row. */
+body[data-section="users"] .card,
+body[data-section="cdrs"]  .card,
+body[data-section="users"] .section,
+body[data-section="cdrs"]  .section {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+}
+body[data-section="users"] .card .label,
+body[data-section="cdrs"]  .card .label {
+  font-family: "Tahoma", "Verdana", sans-serif;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line-soft);
+  padding-bottom: 3px;
+  margin-bottom: 4px;
+}
+body[data-section="users"] .card .value,
+body[data-section="cdrs"]  .card .value {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-1);
+}
+body[data-section="users"] .card .sub,
+body[data-section="cdrs"]  .card .sub {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* Pills → rectangular labelled boxes. Removes the pastel-tinted rounded
+   look; keeps the semantic colours so severity is still readable. */
+body[data-section="users"] .pill,
+body[data-section="cdrs"]  .pill {
+  display: inline-block;
+  padding: 1px 6px;
+  font-family: "Tahoma", "Verdana", sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  background: transparent;
+  border: 1px solid currentColor;
+  color: var(--ink-2);
+  line-height: 1.4;
+  vertical-align: baseline;
+}
+body[data-section="users"] .pill-ok, body[data-section="cdrs"] .pill-ok,
+body[data-section="users"] .pill-active, body[data-section="cdrs"] .pill-active,
+body[data-section="users"] .pill-answered, body[data-section="cdrs"] .pill-answered {
+  color: var(--ok);
+}
+body[data-section="users"] .pill-warn, body[data-section="cdrs"] .pill-warn,
+body[data-section="users"] .pill-kyc_pending, body[data-section="cdrs"] .pill-kyc_pending,
+body[data-section="users"] .pill-quarantined, body[data-section="cdrs"] .pill-quarantined,
+body[data-section="users"] .pill-reserved, body[data-section="cdrs"] .pill-reserved {
+  color: var(--warn);
+}
+body[data-section="users"] .pill-err, body[data-section="cdrs"] .pill-err,
+body[data-section="users"] .pill-blocked, body[data-section="cdrs"] .pill-blocked,
+body[data-section="users"] .pill-suspended, body[data-section="cdrs"] .pill-suspended,
+body[data-section="users"] .pill-retired, body[data-section="cdrs"] .pill-retired {
+  color: var(--err);
+}
+
+/* Buttons — flat, hard-cornered, hairline border. No colour fill on
+   secondary; a solid subdued fill on primary. */
+body[data-section="users"] button, body[data-section="cdrs"] button,
+body[data-section="users"] .btn, body[data-section="cdrs"] .btn,
+body[data-section="users"] input[type=submit], body[data-section="cdrs"] input[type=submit] {
+  font-family: "Tahoma", "Verdana", sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  padding: 3px 10px;
+  background: var(--surface-3);
+  color: var(--ink-1);
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+body[data-section="users"] button:hover, body[data-section="cdrs"] button:hover,
+body[data-section="users"] .btn:hover, body[data-section="cdrs"] .btn:hover {
+  background: var(--surface-4);
+  border-color: var(--ink-3);
+}
+body[data-section="users"] .btn-primary, body[data-section="cdrs"] .btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent-d);
+}
+body[data-section="users"] .btn-danger, body[data-section="cdrs"] .btn-danger {
+  background: var(--surface-3);
+  color: var(--err);
+  border-color: var(--err);
+}
+body[data-section="users"] .btn-warn, body[data-section="cdrs"] .btn-warn {
+  background: var(--surface-3);
+  color: var(--warn);
+  border-color: var(--warn);
+}
+body[data-section="users"] .btn-secondary, body[data-section="cdrs"] .btn-secondary {
+  background: var(--surface-2);
+}
+
+/* Inputs — hairline border, no radius, mono font so numbers line up. */
+body[data-section="users"] input[type=text], body[data-section="cdrs"] input[type=text],
+body[data-section="users"] input[type=search], body[data-section="cdrs"] input[type=search],
+body[data-section="users"] input[type=number], body[data-section="cdrs"] input[type=number],
+body[data-section="users"] input[type=email], body[data-section="cdrs"] input[type=email],
+body[data-section="users"] input[type=password], body[data-section="cdrs"] input[type=password],
+body[data-section="users"] input[type=date], body[data-section="cdrs"] input[type=date],
+body[data-section="users"] select, body[data-section="cdrs"] select,
+body[data-section="users"] textarea, body[data-section="cdrs"] textarea {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink-1);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 3px 6px;
+}
+body[data-section="users"] input:focus, body[data-section="cdrs"] input:focus,
+body[data-section="users"] select:focus, body[data-section="cdrs"] select:focus,
+body[data-section="users"] textarea:focus, body[data-section="cdrs"] textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-color: var(--accent);
+}
+
+/* Toolbar / actions-bar — dense single-line with a solid divider. */
+body[data-section="users"] .actions-bar, body[data-section="cdrs"] .actions-bar,
+body[data-section="users"] .toolbar, body[data-section="cdrs"] .toolbar {
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  padding: 5px 8px;
+  margin-bottom: 6px;
+  gap: 6px;
+}
+
+/* Pagination — sharp-edged number strip. */
+body[data-section="users"] .pagination a, body[data-section="cdrs"] .pagination a,
+body[data-section="users"] .pagination span, body[data-section="cdrs"] .pagination span {
+  border: 1px solid var(--line);
+  padding: 2px 8px;
+  font-family: inherit;
+  font-size: 11px;
+  background: var(--surface-2);
+  color: var(--ink-1);
+}
+body[data-section="users"] .pagination .current,
+body[data-section="cdrs"]  .pagination .current {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent-d);
+}
+
+/* Links — the classic underlined navy-on-silver look, mapped onto our
+   dark accent so it doesn't fight the surface. */
+body[data-section="users"] .link, body[data-section="cdrs"] .link,
+body[data-section="users"] a.link, body[data-section="cdrs"] a.link {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+body[data-section="users"] .link:hover, body[data-section="cdrs"] .link:hover {
+  color: var(--ink-1);
+}
+
+/* Code + monospace cells — visible box, tight padding. */
+body[data-section="users"] code, body[data-section="cdrs"] code {
+  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+  padding: 0 4px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--ink-1);
+}
+
+/* Modals — plain panel, no floating card look. */
+body[data-section="users"] dialog, body[data-section="cdrs"] dialog {
+  background: var(--surface-1);
+  border: 1px solid var(--ink-3);
+  padding: 0;
+  color: var(--ink-1);
+  font-family: inherit;
+  font-size: 13px;
+}
+body[data-section="users"] .modal-head, body[data-section="cdrs"] .modal-head {
+  background: var(--surface-4);
+  border-bottom: 1px solid var(--line);
+  padding: 6px 10px;
+}
+
+/* Tabs — flat file-folder tabs, active one solid-filled. */
+body[data-section="users"] .tabs, body[data-section="cdrs"] .tabs {
+  border-bottom: 1px solid var(--line);
+  gap: 0;
+}
+body[data-section="users"] .tabs a, body[data-section="cdrs"] .tabs a {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-bottom: none;
+  margin-right: -1px;
+  background: var(--surface-1);
+  font-family: "Tahoma", "Verdana", sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--ink-2);
+}
+body[data-section="users"] .tabs a.active, body[data-section="cdrs"] .tabs a.active {
+  background: var(--surface-3);
+  color: var(--ink-1);
+  border-bottom: 1px solid var(--surface-3);
+  position: relative;
+  z-index: 1;
+}
+
+/* Empty state — plain panel, no illustrated flourish. */
+body[data-section="users"] .empty-state, body[data-section="cdrs"] .empty-state {
+  background: var(--surface-1);
+  border: 1px dashed var(--ink-3);
+  padding: 12px;
+  text-align: center;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+/* Subtle bits — sub-labels, muted text, sort icons — condense slightly. */
+body[data-section="users"] .muted, body[data-section="cdrs"] .muted,
+body[data-section="users"] .subtext, body[data-section="cdrs"] .subtext {
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* ── END CARRIER-GRADE SKIN ─────────────────────────────────────────────── */
 </style>
 <script>
 function openModal(id){var d=document.getElementById(id);if(d&&d.showModal)d.showModal();}
@@ -785,7 +1121,7 @@ function setDateRange(preset, fromId, toId, submit){
 }
 </script>
 </head>
-<body>
+<body data-section="{{.Section}}">
 {{if .ShowChrome}}
 <div class="shell">
   <aside class="sidebar">
