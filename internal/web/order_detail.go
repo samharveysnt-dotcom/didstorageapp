@@ -302,6 +302,42 @@ func (h *Handler) orderDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	mrows.Close()
 
+	// ----- Available DIDs for the "Swap DID" modal (bounded) -----
+	//
+	// Populates the target-DID <select> on the order-detail page. Kept
+	// small (LIMIT 500) so the payload doesn't balloon on installations
+	// with tens of thousands of DIDs; if a specific target isn't in the
+	// list the operator can filter by country/supplier from the /dids
+	// page and note the E.164 to type in a search-by-e164 flow (future).
+	//
+	// Sort: same supplier as the current order first (a DID from the
+	// same carrier is almost always the intended swap target — it keeps
+	// signalling paths and rate cards intact), then everything else by
+	// country + e164 so it's browsable.
+	type swapDIDRow struct {
+		ID           int64
+		E164         string
+		Country      string
+		Supplier     string
+		SameSupplier bool
+	}
+	var availableDIDs []swapDIDRow
+	adrows, _ := h.DB.Query(r.Context(), `
+		SELECT d.id, d.e164, d.country_iso, s.name,
+		       (d.supplier_id = $1) AS same_supplier
+		  FROM dids d
+		  JOIN suppliers s ON s.id = d.supplier_id
+		 WHERE d.status = 'available' AND d.id <> $2
+		 ORDER BY (d.supplier_id = $1) DESC, d.country_iso, d.e164
+		 LIMIT 500`, hd.SupplierID, hd.DIDID)
+	for adrows.Next() {
+		var x swapDIDRow
+		if err := adrows.Scan(&x.ID, &x.E164, &x.Country, &x.Supplier, &x.SameSupplier); err == nil {
+			availableDIDs = append(availableDIDs, x)
+		}
+	}
+	adrows.Close()
+
 	ok, em := h.popFlashes(r)
 	h.render(w, "order_detail", map[string]any{
 		"Title":               "Order #" + chi.URLParam(r, "id"),
@@ -309,6 +345,7 @@ func (h *Handler) orderDetail(w http.ResponseWriter, r *http.Request) {
 		"FlashOK":             ok,
 		"FlashErr":            em,
 		"Order":               hd,
+		"AvailableDIDs":       availableDIDs,
 		"Revenue30dDollars":   float64(rev30) / 100,
 		"Profit30dDollars":    float64(rev30-sup30) / 100,
 		"RevenueLifeDollars":  float64(revLife) / 100,

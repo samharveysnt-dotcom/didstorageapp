@@ -111,10 +111,11 @@ function dsFilterOrders(){
               data-channel-count="{{.ChannelCount}}"
               data-ann-day="{{.AnniversaryDay}}"
               data-kyc="{{if .KycBundleID}}{{.KycBundleID}}{{end}}">{{icon "edit"}}edit</button>
+      <a class="link" href="/orders/{{.ID}}#route" title="Point this order at a different DID (no charge, MRC/schedule preserved)">{{icon "arrow-right"}}swap DID</a>
+      <form method="post" action="/orders/{{.ID}}/cancel" style="display:inline" onsubmit="return confirm('Cancel order #{{.ID}} ({{.DID}})?  DID returns to the available pool.')">
+        <button class="btn-warn">{{icon "trash"}}cancel</button>
+      </form>
     {{end}}
-    <form method="post" action="/orders/{{.ID}}/cancel" style="display:inline" onsubmit="return confirm('Cancel order #{{.ID}} ({{.DID}})?  DID returns to the available pool.')">
-      <button class="btn-warn">{{icon "trash"}}cancel</button>
-    </form>
   </td>
 </tr>
 {{end}}

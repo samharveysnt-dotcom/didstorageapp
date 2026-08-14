@@ -112,10 +112,11 @@
                 data-channel-count="{{.ChannelCount}}"
                 data-ann-day="{{.AnniversaryDay}}"
                 data-kyc="{{if .KycBundleID}}{{.KycBundleID}}{{end}}">edit</button>
-        {{end}}
+        <a class="link" href="/orders/{{.ID}}" title="Open order to swap the DID (no charge)">swap DID</a>
         <form method="post" action="/orders/{{.ID}}/cancel" style="display:inline" onsubmit="return confirm('Cancel order for {{.E164}}? DID returns to pool.')">
           <button class="btn-warn">cancel</button>
         </form>
+        {{end}}
       </td>
     </tr>
   {{end}}

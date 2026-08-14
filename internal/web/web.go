@@ -409,6 +409,10 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Post("/orders/{id}/route", h.orderUpdate)
 		r.Post("/orders/{id}/update", h.orderUpdate)
 		r.Post("/orders/{id}/cancel", h.orderCancel)
+		// Zero-charge DID swap. Preserves rate card, billing schedule,
+		// route, channel_count, KYC bundle — only orders.did_id changes.
+		// See crud.go orderSwapDID doc.
+		r.Post("/orders/{id}/swap-did", h.orderSwapDID)
 		r.Get("/orders/{id}/export/cdrs.csv", h.orderExportCDRs)
 		r.Get("/orders/{id}", h.orderDetail)
 

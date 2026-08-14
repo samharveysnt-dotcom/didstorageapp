@@ -17,6 +17,16 @@
     <span class="pill pill-{{.Order.Status}}" style="margin-left:.5rem">{{.Order.Status}}</span>
   </h1>
   <div class="row-actions">
+    {{if or (eq .Order.Status "active") (eq .Order.Status "kyc_pending") (eq .Order.Status "quarantined")}}
+    <button class="btn-secondary" onclick="openModal('swap-did-modal')"
+            title="Point this order at a different DID with no charge. Rate card, billing schedule, route, channels — all preserved. Only the number changes.">
+      {{icon "arrow-right"}}Swap DID
+    </button>
+    <form method="post" action="/orders/{{.Order.ID}}/cancel" style="display:inline"
+          onsubmit="return confirm('Cancel order #{{.Order.ID}} for {{.Order.E164}}? DID returns to the available pool.')">
+      <button class="btn-warn">{{icon "trash"}}Cancel order</button>
+    </form>
+    {{end}}
     <a class="link" href="/users/{{.Order.UserID}}#orders">{{icon "arrow-left"}}back to user</a>
     <a class="link" href="/orders">all orders</a>
   </div>
@@ -584,5 +594,65 @@ function showOrdTab(ev, name){
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.dataset.tab === h));
   }
 })();
+// Client-side filter for the Swap DID picker — search-as-you-type by
+// E.164 fragment, matches against the raw text of each <option>. Keeps
+// the list navigable when there are hundreds of available DIDs.
+function swapDIDFilter(){
+  var q = (document.getElementById('swap-did-search').value || '').toLowerCase();
+  var sel = document.getElementById('swap-did-select');
+  var hits = 0;
+  for (var i=0; i<sel.options.length; i++){
+    var o = sel.options[i];
+    if (!o.value){ continue; } // skip the placeholder option
+    var match = o.textContent.toLowerCase().indexOf(q) !== -1;
+    o.hidden = !match;
+    if (match){ hits++; }
+  }
+  document.getElementById('swap-did-hits').textContent = hits + ' match' + (hits === 1 ? '' : 'es');
+}
 </script>
+
+<!-- ============================================================ Swap DID modal -->
+<dialog id="swap-did-modal">
+  <div class="modal-head">
+    <h3>Swap DID <span class="muted">on order #{{.Order.ID}}</span></h3>
+    <button class="close" type="button" aria-label="Close dialog" onclick="closeModal('swap-did-modal')">×</button>
+  </div>
+  <form method="post" action="/orders/{{.Order.ID}}/swap-did" class="modal-body">
+    <p class="muted" style="margin-top:0;font-size:13px">
+      Points this order at a different DID <strong>with no charge</strong>. Rate card,
+      billing schedule (anniversary day {{.Order.AnniversaryDay}}, next billing
+      {{.Order.NextBillingAt}}), route (<code>{{.Order.RouteKind}}</code>),
+      channel count ({{.Order.ChannelCount}}) and KYC bundle are all preserved.
+      The current DID (<code>{{.Order.E164}}</code>) returns to the available pool.
+    </p>
+
+    <label for="swap-did-search">Filter available DIDs</label>
+    <input id="swap-did-search" type="search" placeholder="type an E.164 fragment or country code…"
+           oninput="swapDIDFilter()" autocomplete="off">
+    <div class="muted" style="font-size:11.5px;margin:.2rem 0 .6rem">
+      <span id="swap-did-hits">{{len .AvailableDIDs}} match{{if ne (len .AvailableDIDs) 1}}es{{end}}</span>
+      · same-supplier DIDs listed first
+      {{if eq (len .AvailableDIDs) 0}} · <span class="err">no available DIDs — reserve or import one first</span>{{end}}
+    </div>
+
+    <label for="swap-did-select">Target DID</label>
+    <select id="swap-did-select" name="new_did_id" required size="10" style="width:100%;font-family:var(--font-mono)">
+      {{range .AvailableDIDs}}
+      <option value="{{.ID}}">{{.E164}} · {{.Country}} · {{.Supplier}}{{if .SameSupplier}} ★ same supplier{{end}}</option>
+      {{end}}
+    </select>
+
+    <label for="swap-did-reason" style="margin-top:.6rem">Reason <span class="muted">(logged to compliance journal)</span></label>
+    <input id="swap-did-reason" type="text" name="reason" maxlength="200"
+           placeholder="e.g. carrier reported number-portability issue on the current DID">
+
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" onclick="closeModal('swap-did-modal')">Cancel</button>
+      <button type="submit" class="btn-primary" {{if eq (len .AvailableDIDs) 0}}disabled{{end}}>
+        {{icon "arrow-right"}}Swap DID (no charge)
+      </button>
+    </div>
+  </form>
+</dialog>
 {{end}}

@@ -21,6 +21,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"didstorage/internal/asteriskcfg"
+	"didstorage/internal/auth"
 	"didstorage/internal/domain"
 )
 
@@ -1936,6 +1937,126 @@ func (h *Handler) orderCancel(w http.ResponseWriter, r *http.Request) {
 	} else {
 		http.Redirect(w, r, "/orders", http.StatusFound)
 	}
+}
+
+// orderSwapDID atomically points an active order at a different DID with no
+// charge to the customer — the rate card, billing schedule (anniversary,
+// next_billing_at), channel_count, route, and all financials are preserved.
+// Only the underlying DID number changes.
+//
+// Use cases: number-portability issue on the current DID (carrier says
+// "we can no longer route this number, please switch"), operator swap
+// after a customer complaint about a specific number's reputation, or
+// simply exchanging a temporary DID for a permanent one during
+// provisioning.
+//
+// Transaction ordering matters: the DIDStorage schema has a partial
+// UNIQUE INDEX orders_one_active_per_did on orders(did_id) WHERE
+// status='active'. Because the OLD order stays active throughout, and
+// only one order can be active per DID at a time, we must either:
+//   (a) release the OLD DID first, then move the order to the NEW DID
+//       (safe — the OLD DID is now 'available' so nothing enforces
+//        uniqueness against it), then mark the NEW DID 'assigned', OR
+//   (b) do the moves inside a single tx and rely on Postgres deferring
+//       the constraint check to commit.
+//
+// This handler uses (a) explicitly. Both DID rows are locked FOR UPDATE
+// to prevent a concurrent reserve/release from racing us.
+func (h *Handler) orderSwapDID(w http.ResponseWriter, r *http.Request) {
+	oid := pathID(r, "id")
+	if err := r.ParseForm(); err != nil {
+		h.flashErr(r, "bad form")
+		http.Redirect(w, r, fmt.Sprintf("/orders/%d", oid), http.StatusFound)
+		return
+	}
+	newDIDID, _ := strconv.ParseInt(r.PostForm.Get("new_did_id"), 10, 64)
+	reason := strings.TrimSpace(r.PostForm.Get("reason"))
+	if newDIDID <= 0 {
+		h.flashErr(r, "select a DID to swap in")
+		http.Redirect(w, r, fmt.Sprintf("/orders/%d", oid), http.StatusFound)
+		return
+	}
+
+	tx, err := h.DB.Begin(r.Context())
+	if err != nil {
+		h.flashErr(r, err.Error())
+		http.Redirect(w, r, fmt.Sprintf("/orders/%d", oid), http.StatusFound)
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	// 1. Lock the order row + snapshot current state.
+	var userID, oldDIDID int64
+	var status string
+	if err = tx.QueryRow(r.Context(),
+		`SELECT user_id, did_id, status::text FROM orders WHERE id=$1 FOR UPDATE`, oid,
+	).Scan(&userID, &oldDIDID, &status); err != nil {
+		h.flashErr(r, "order not found: "+err.Error())
+		http.Redirect(w, r, "/orders", http.StatusFound)
+		return
+	}
+	if status != "active" && status != "kyc_pending" && status != "quarantined" {
+		h.flashErr(r, "cannot swap DID on a "+status+" order")
+		http.Redirect(w, r, fmt.Sprintf("/orders/%d", oid), http.StatusFound)
+		return
+	}
+	if oldDIDID == newDIDID {
+		h.flashErr(r, "order is already assigned to that DID")
+		http.Redirect(w, r, fmt.Sprintf("/orders/%d", oid), http.StatusFound)
+		return
+	}
+
+	// 2. Lock + verify the target DID is available.
+	var oldE164, newE164, newStatus string
+	if err = tx.QueryRow(r.Context(),
+		`SELECT e164, status::text FROM dids WHERE id=$1 FOR UPDATE`, newDIDID,
+	).Scan(&newE164, &newStatus); err != nil {
+		h.flashErr(r, "target DID not found: "+err.Error())
+		http.Redirect(w, r, fmt.Sprintf("/orders/%d", oid), http.StatusFound)
+		return
+	}
+	if newStatus != "available" {
+		h.flashErr(r, fmt.Sprintf("target DID %s is not available (status=%s)", newE164, newStatus))
+		http.Redirect(w, r, fmt.Sprintf("/orders/%d", oid), http.StatusFound)
+		return
+	}
+	// e164 of the outgoing DID — best-effort for the flash + audit log.
+	_ = tx.QueryRow(r.Context(), `SELECT e164 FROM dids WHERE id=$1 FOR UPDATE`, oldDIDID).Scan(&oldE164)
+
+	// 3. Release old DID → order points at new → mark new as assigned.
+	//    See handler doc for why this ordering is safe against the
+	//    orders_one_active_per_did unique index.
+	if _, err = tx.Exec(r.Context(), `UPDATE dids SET status='available' WHERE id=$1`, oldDIDID); err != nil {
+		h.flashErr(r, "release old DID: "+err.Error())
+		http.Redirect(w, r, fmt.Sprintf("/orders/%d", oid), http.StatusFound)
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `UPDATE orders SET did_id=$1 WHERE id=$2`, newDIDID, oid); err != nil {
+		h.flashErr(r, "repoint order: "+err.Error())
+		http.Redirect(w, r, fmt.Sprintf("/orders/%d", oid), http.StatusFound)
+		return
+	}
+	if _, err = tx.Exec(r.Context(), `UPDATE dids SET status='assigned' WHERE id=$1`, newDIDID); err != nil {
+		h.flashErr(r, "assign new DID: "+err.Error())
+		http.Redirect(w, r, fmt.Sprintf("/orders/%d", oid), http.StatusFound)
+		return
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		h.flashErr(r, "commit: "+err.Error())
+		http.Redirect(w, r, fmt.Sprintf("/orders/%d", oid), http.StatusFound)
+		return
+	}
+
+	// 4. Compliance log. After commit so a rolled-back swap never leaves an
+	//    audit trail claiming a change that didn't happen.
+	adminID := auth.AdminIDFromSession(h.Session, r)
+	h.writeComplianceEvent(r.Context(), userID, oid, adminID,
+		"order_did_swap", reason,
+		fmt.Sprintf("swapped from %s (did_id=%d) to %s (did_id=%d) — no charge, MRC/NRC/anniversary preserved",
+			oldE164, oldDIDID, newE164, newDIDID))
+
+	h.flashOK(r, fmt.Sprintf("DID swapped: %s → %s. No charge; billing schedule unchanged.", oldE164, newE164))
+	http.Redirect(w, r, fmt.Sprintf("/orders/%d", oid), http.StatusFound)
 }
 
 // =====================================================================
